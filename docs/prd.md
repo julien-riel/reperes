@@ -1,12 +1,9 @@
 # PRD — wsmd · Plateforme d'audit automatisé d'actifs viaires municipaux
 
-**Version** : 4.0 (pivot évaluation d'état)
 **Date** : 2026-04-27
 **Statut** : draft, en attente de validation produit
 **Auteur** : Julien Riel, avec assistance Claude
-**Cible PoC** : Deux modules vendables — PaveAudit (état de chaussée selon méthodo MTQ) et ChantierWatch (détection de chantiers + cross-check permits OdP), validés empiriquement à Montréal, Longueuil et Sherbrooke
-
-> Cette version 4.0 **remplace** la version 3.0 (qui ciblait l'inventaire géoréférencé précis Niveau B). Le pivot stratégique vers l'évaluation d'état est documenté en §2.
+**Cible PoC** : Deux modules livrables — PaveAudit (état de chaussée selon méthodo MTQ) et ChantierWatch (détection de chantiers + cross-check permits OdP), validés empiriquement à Montréal, Longueuil et Sherbrooke
 
 > Ce document est la **seule source de vérité produit** pour wsmd. Il remplace toute spec ou plan antérieur. Les spécifications d'implémentation (architecture, code, séquence des tâches) en découlent.
 
@@ -23,49 +20,34 @@ Le PoC v1 livre **trois modules** :
 
 L'architecture supporte l'ajout futur d'évaluateurs (signalisation, mobilier urbain, marquage, etc.) sans refonte du pipeline. **Chaque évaluateur a son propre protocole de validation, ses propres KPIs, et son propre livrable.**
 
-À court terme, l'objectif est de **prouver la faisabilité technique et commerciale** des deux modules sur trois zones tests représentatives, avec un matériel grand public et une chaîne logicielle 100 % open source.
+L'objectif est de **prouver la faisabilité technique** des deux modules sur trois zones tests représentatives, avec un matériel grand public et une chaîne logicielle 100 % open source.
 
-À long terme, ce système doit permettre à des **firmes de génie** de sous-traiter une partie de leurs audits visuels (économie de jp d'inspecteur), et à des **services d'inspection municipaux** de détecter les chantiers non-permittés sur leur territoire.
+> **Note** : la stratégie commerciale (audiences clients, cycles de vente, tarification, pitch, incorporation) est traitée séparément dans `docs/marketing/`. Le présent PRD se concentre sur le produit, son architecture et sa validation.
 
 ---
 
 ## 2. Contexte et motivation
 
-### 2.1 Pivot depuis la v3
+### 2.1 Pivot stratégique
 
-La version 3.0 du PRD (inventaire d'actifs géoréférencés à précision Niveau B 0.5–2 m) a été abandonnée pour les raisons suivantes :
+Une approche initiale (inventaire d'actifs géoréférencés à précision Niveau B 0.5–2 m) a été abandonnée pour la raison suivante :
 
 - **Risque technique élevé** : la précision Niveau B en milieu urbain dense, sans matériel RTK, dépend de variables (heading magnétique, multipath GNSS, conditionnement de la triangulation N-vues) qui sont difficiles à maîtriser dans un side project.
-- **Faible fit commercial** : précision Niveau B (0.5-2 m) est trop imprécise pour les firmes de génie (qui veulent du Niveau C cm pour responsabilité légale) et trop précise pour les besoins informels (où Google Maps ou OpenStreetMap suffisent).
-- **Concurrence directe** : Mapillary (Meta), Trimble MX9, Leica Pegasus occupent ce créneau avec un avantage matériel structurel.
 
 Le pivot vers l'évaluation d'état :
 - **Réduit le risque technique** : la précision géométrique requise descend à ±10 m (segment de rue), résolue par snap-to-road sur Géobase/OSM. Les problèmes de heading, calibration extrinsèque, et triangulation disparaissent.
-- **Adresse un marché identifié** : RoadBotics (Michelin Mobility Intelligence), Vialytics, Carbin opèrent ce marché avec des modèles SaaS à 5–50 k$/an par municipalité. Le marché existe, il est mal servi au Québec.
-- **Crée un moat québécois** : aucun concurrent n'est entraîné sur les défauts hivernaux du Québec, ne reconnaît la signalisation MUTCD-Québec, ni n'intègre les données ouvertes municipales québécoises (Données Québec, Géobase, permits OdP).
+- **Permet d'exploiter un référentiel québécois** : entraînement sur défauts hivernaux du Québec, reconnaissance de la signalisation MUTCD-Québec, intégration des données ouvertes municipales (Données Québec, Géobase, permits OdP).
 
 ### 2.2 Pourquoi maintenant
 
 - Les **modèles open-vocabulary** (Grounding DINO, YOLO-World, SAM) atteignent en 2025-2026 une qualité suffisante pour la pré-annotation automatique sur classes arbitraires définies par texte. Cela réduit drastiquement le coût d'annotation initial.
 - Les **iPhone récents** (16 Pro et postérieurs) embarquent un GNSS bi-bande, une centrale inertielle de qualité, et une caméra 4K HDR ProRes — accessibles directement via `AVFoundation` + `CoreLocation` + `CoreMotion`. Un dispositif unique remplace ce qui demandait précédemment caméra + GNSS + IMU + ordinateur de captation.
-- Les **données ouvertes municipales** (Géobase, permits OdP, entraves planifiées) sont publiées en continu par Montréal et plusieurs villes secondaires. Le cross-référencement automatique est une fonctionnalité unique sur le marché.
+- Les **données ouvertes municipales** (Géobase, permits OdP, entraves planifiées) sont publiées en continu par Montréal et plusieurs villes secondaires. Le cross-référencement automatique devient techniquement faisable.
 - Les **standards OGC API Features** sont matures et adoptés par les SIG modernes (QGIS, Esri, géoportails municipaux). Une livraison standard est immédiatement consommable.
 
-### 2.3 Le problème côté client
+### 2.3 Ce que **n'est pas** wsmd à ce stade
 
-**Pour les firmes de génie** (WSP, Englobe, CIMA+, EXP, SNC) :
-
-Les firmes sous-traitent fréquemment des **audits PCI/MTQ** sur des mandats de la voirie (MTQ, municipalités). Ces audits requièrent un inspecteur certifié inspectant visuellement des kilomètres de chaussée — typiquement 5-10 km/jp. À ~600-800 $/jp facturés, un mandat de 200 km coûte 25-40 jp d'inspecteur.
-
-**Si un système automatisé pré-classifie 80 % des défauts à 75 %+ d'agreement avec un inspecteur certifié**, l'inspecteur passe en mode "vérification ciblée" : 1-2 h par segment au lieu de 1-2 h par kilomètre. **Économie estimée : 60-70 % des jp d'inspecteur.**
-
-**Pour les services d'inspection municipaux** :
-
-Les villes publient les permits OdP en open data, mais aucun système ne croise ces données avec une vérification terrain automatisée. Les **chantiers non-déclarés** (entrepreneurs sans permit, occupations illégales, signalisation manquante) sont détectés au cas par cas, par signalement citoyen ou inspection ponctuelle. Une plateforme qui flag systématiquement les zones de chantier sans correspondance permit produit un signal d'audit à valeur de redressement directe (amendes + frais de mise en conformité).
-
-### 2.4 Ce que **n'est pas** wsmd à ce stade
-
-- Ce n'est **pas** un outil de positionnement précis Niveau B/C (cf. abandon v3).
+- Ce n'est **pas** un outil de positionnement précis Niveau B/C.
 - Ce n'est **pas** un système temps réel — toute évaluation est post-captation.
 - Ce n'est **pas** un service SaaS multi-utilisateurs avec auth/dashboard. Le PoC v1 est mono-utilisateur, localhost.
 - Ce n'est **pas** un produit clé-en-main certifié pour responsabilité légale. Le livrable est un *signal d'audit*, pas une *preuve* — la décision d'enforcement reste au client.
@@ -85,14 +67,7 @@ L'auteur est employé dans le secteur municipal québécois. Le projet wsmd est 
 - Le PRD et tous les livrables ne référencent ni ne traitent aucun cas spécifique à la municipalité-employeur.
 - Les zones de test sont sélectionnées dans des municipalités tierces (Montréal, Longueuil, Sherbrooke) sans relation avec l'employeur.
 
-### 3.2 Discipline avant commercialisation
-
-- **Divulgation à l'autorité d'éthique** ou au service RH de l'employeur, conformément aux règles internes d'activités accessoires (à vérifier en Phase 0).
-- **Vérification de la conformité** au code d'éthique applicable (Loi sur l'éthique et la déontologie en matière municipale, RLRQ c E-15.1.0.1, ou règlement interne employeur, selon le cas).
-- **Incorporation d'une entité juridique distincte** (probablement Inc. ou SENC) avant toute facturation ou contractualisation, pour clairement séparer les patrimoines.
-- **Aucun pitch ni vente** à la municipalité-employeur ni à ses fournisseurs/sous-traitants directs identifiés, pour éviter tout soupçon de conflit ou d'avantage indu.
-
-### 3.3 Audit interne du PRD
+### 3.2 Audit interne du PRD
 
 Si une partie du PRD venait à manquer à cette discipline (par exemple, en faisant référence à un dossier interne, en réutilisant un standard maison, ou en citant des chiffres confidentiels), l'auteur s'engage à corriger immédiatement. Aucune telle référence n'est connue à la date de rédaction.
 
@@ -100,29 +75,28 @@ Si une partie du PRD venait à manquer à cette discipline (par exemple, en fais
 
 ## 4. Audiences et cas d'usage
 
-### 4.1 Audiences cibles
+### 4.1 Audiences produit
 
-| Audience | Cas d'usage primaire | Module pertinent | Cycle de vente |
-|---|---|---|---|
-| Firmes de génie sous-traitant des audits MTQ/municipaux (WSP, Englobe, CIMA+, EXP, SNC, Englobe Géomatique) | Pré-classement d'inspection visuelle, économie de jp d'inspecteur certifié | PaveAudit | 3-6 mois |
-| Services d'inspection / conformité de villes secondaires québécoises | Détection automatisée de chantiers sans permit, audit de conformité | ChantierWatch | 6-12 mois |
-| Universités (Phase 2) — Polytechnique, ÉTS, ULaval, McGill | Cofinancement CRSNG Alliance avec firme partenaire ; dataset Quebec hivernal pour publication | Tous + dataset | 12-18 mois |
+Profils d'utilisateurs visés par les fonctionnalités du PoC v1. Cadre les exigences fonctionnelles (formats de livrable, ergonomie, terminologie) — pas la stratégie d'aller-au-marché, qui est traitée dans `docs/marketing/`.
 
-**Hors-cible explicite** : la municipalité-employeur de l'auteur ; ses fournisseurs et sous-traitants directs ; les acteurs avec qui l'auteur est en relation professionnelle dans son emploi principal.
+| Audience | Cas d'usage produit | Module pertinent |
+|---|---|---|
+| Inspecteurs certifiés réalisant des audits PCI/MTQ | Pré-classement automatisé de défauts pour révision ciblée | PaveAudit |
+| Services d'inspection municipaux | Détection de chantiers + cross-check permits OdP | ChantierWatch |
 
-### 4.2 Cas d'usage cibles
+**Hors-périmètre explicite** : aucun usage par la municipalité-employeur de l'auteur, ses fournisseurs, ses sous-traitants directs, ni les acteurs avec qui l'auteur est en relation professionnelle dans son emploi principal (cf. §3.1).
 
-**Cas d'usage 1 — Audit PCI/MTQ pour firme de génie**
+### 4.2 Cas d'usage produit
 
-> Une firme reçoit un mandat MTQ de 200 km à inspecter visuellement. Au lieu de mobiliser 30 jp d'inspecteur, elle équipe un véhicule d'un iPhone wsmd, fait deux journées de captation, lance le pipeline, et reçoit un GeoPackage + rapport PDF pré-classifiant les défauts. Un inspecteur certifié relit en 5-7 jp pour valider et signer le livrable.
+Scénarios qui dictent les exigences fonctionnelles (volume, débit, format de sortie, ergonomie de révision).
 
-**Cas d'usage 2 — Audit de conformité chantier pour ville secondaire**
+**Cas d'usage 1 — Pré-classement d'un audit visuel de chaussée à grande échelle**
 
-> Le service d'inspection d'une ville de 100 k habitants publie ses permits OdP. Il fait un tour de 30 km mensuel avec wsmd, le système croise les zones de chantier détectées avec les permits actifs, produit une liste de "potentiels chantiers non-permittés à vérifier sur le terrain". L'inspecteur cible ses visites au lieu de patrouiller à l'aveugle.
+> Un inspecteur certifié doit auditer 200 km de réseau. Le véhicule équipé d'un iPhone wsmd fait deux journées de captation, le pipeline tourne sur Mac, produit un GeoPackage + rapport PDF avec pré-classement des défauts. L'inspecteur relit en mode "vérification ciblée" plutôt qu'en inspection à l'aveugle.
 
-**Cas d'usage 3 — Recherche académique financée**
+**Cas d'usage 2 — Détection de chantiers vs permits sur tour municipal régulier**
 
-> Un labo de Polytechnique obtient une subvention CRSNG Alliance avec une firme de génie co-investisseuse pour étudier la "détection automatisée de dégradations hivernales par CV embarquée". wsmd fournit la chaîne technique, le labo fournit les ressources d'annotation et la publication.
+> Un service d'inspection municipal fait un tour de 30 km mensuel avec wsmd. Le système croise les zones de chantier détectées avec les permits OdP en open data, produit une liste de zones sans correspondance permit. L'inspection terrain est ciblée plutôt qu'à l'aveugle.
 
 ---
 
@@ -135,12 +109,7 @@ Si une partie du PRD venait à manquer à cette discipline (par exemple, en fais
 
 **Précondition critique** : ces objectifs ne sont atteints qu'**après la Phase 1 d'annotation** (bootstrap dataset Québec via pré-annotation + révision humaine). En sortie de Phase 0, les modèles pré-entraînés out-of-the-box donneront une baseline ~60 % mAP — c'est attendu, c'est le point de départ.
 
-Si cette hypothèse est validée, elle débloque :
-- Un service de sous-traitance d'audit visuel facturable au km, vendable aux firmes de génie.
-- Un service d'audit de conformité chantier vendable aux villes secondaires.
-- Une crédibilité technique pour des subventions de recherche (CRSNG, Mitacs, FRQ).
-
-Si elle est invalidée, l'auteur saura **où** se situe le maillon faible (qualité dataset, fine-tuning, couplage permits, ergonomie annotation) et pourra investir de manière ciblée.
+Si l'hypothèse est invalidée, l'auteur saura **où** se situe le maillon faible (qualité dataset, fine-tuning, couplage permits, ergonomie annotation) et pourra investir de manière ciblée.
 
 ---
 
@@ -678,9 +647,7 @@ class PermitAdapter(Protocol):
 
 ### 13.1 Pourquoi un module à part entière
 
-Aucun évaluateur ne sera jamais à 100 % en sortie. Pour qu'une firme ou une ville accepte le livrable, un humain doit pouvoir relire, corriger, et **certifier**. Chaque correction = un nouvel exemple d'entraînement pour le fine-tune incrémental.
-
-L'outil d'annotation est aussi le **différenciateur de vente** : "tu reçois un rapport pré-classé à 80 %, ton ingénieur civil le corrige en 2 h plutôt que d'inspecter en 5 jours."
+Aucun évaluateur ne sera jamais à 100 % en sortie. Pour qu'un livrable soit acceptable, un humain doit pouvoir relire, corriger, et **certifier**. Chaque correction = un nouvel exemple d'entraînement pour le fine-tune incrémental.
 
 ### 13.2 Architecture
 
@@ -945,21 +912,20 @@ resources:
 
 | Risque | Probabilité | Impact | Mitigation |
 |---|---|---|---|
-| Grounding DINO + fine-tune ratent les défauts hivernaux subtils (frost heave, salt scaling) | Moyenne-haute | Cible IES non atteinte | Annotation manuelle dédiée à ces classes ; flag explicite dans rapport ; "v2 avec capteur inertiel pour IRI" en upsell |
-| Permits Sherbrooke peu/pas en open data | Élevée | ChantierWatch dégradé sur Sherbrooke | `GenericNoneAdapter` qui flag toutes zones `data_unavailable` ; pitch "ça force la ville à publier ses permits" comme argument civic-tech |
+| Grounding DINO + fine-tune ratent les défauts hivernaux subtils (frost heave, salt scaling) | Moyenne-haute | Cible IES non atteinte | Annotation manuelle dédiée à ces classes ; flag explicite dans rapport ; renvoi à v2 IRI capteur inertiel |
+| Permits Sherbrooke peu/pas en open data | Élevée | ChantierWatch dégradé sur Sherbrooke | `GenericNoneAdapter` qui flag toutes zones `data_unavailable` ; livrable identifie explicitement la limitation |
 | Side project, fenêtre 4-6 mois optimiste | Moyenne | Démo retardée | Découpage livraisons : démo PaveAudit seul à 4 mois si ChantierWatch retarde ; plan B documenté |
-| Validation κ ≥ 0.6 non atteinte malgré fine-tune | Moyenne | Pas de pitch firme convaincant | Calibrer scoring vs MTQ sur données réelles avant de promettre ; ajuster les seuils MTQ ; reformuler pitch en "outil de pré-priorisation" |
+| Validation κ ≥ 0.6 non atteinte malgré fine-tune | Moyenne | Cible qualité non atteinte | Calibrer scoring vs MTQ sur données réelles avant de promettre ; ajuster les seuils MTQ ; repositionner le module en "outil de pré-priorisation" |
 | Volumes de vidéos ingérables | Faible | Sessions limitées | H.265 4K = ~6 GB/h ; SSD externe 1-2 TB suffit pour la durée du PoC |
 | iPhone 16 Pro indisponible / ancienne génération moins précise | Faible | Précision GNSS dégradée | Tester sur iPhone 15 Pro en backup ; mesurer empiriquement |
 
-### 18.2 Risques commerciaux et juridiques
+### 18.2 Risques juridiques et de licences
 
 | Risque | Probabilité | Impact | Mitigation |
 |---|---|---|---|
-| Conflit d'intérêts mal géré | Faible mais critique | Sanction professionnelle | Divulgation à l'autorité d'éthique avant tout pitch ; entité juridique distincte avant facturation ; aucune captation/usage matériel employeur (cf. §3) |
-| Dataset QC non commercialement utilisable (licences source) | Faible | Modèle final non vendable | Vérifier licences en Phase 0 ; toute donnée incertaine → exclue du dataset commercial ; possibilité re-train from scratch sur dataset 100 % maison Phase 2 |
-| Loi 25 — vidéos avec plaques/visages | Moyenne | Risque légal vente | Stockage local SSD chiffré v1 ; floutage automatique avant tout partage externe (Phase 2, modèle ANPR + MTCNN) ; ne pas démontrer à un client avec vidéos brutes |
-| Disclaimer "signal d'audit" insuffisant en cas de litige | Faible | Risque légal | Avis juridique avant premier contrat commercial ; clauses contractuelles claires de limitation de responsabilité |
+| Dataset QC non utilisable hors recherche (licences source) | Faible | Modèle final restreint à un cadre académique | Vérifier licences en Phase 0 ; toute donnée incertaine → exclue ; possibilité re-train from scratch sur dataset 100 % maison Phase 2 |
+| Loi 25 — vidéos avec plaques/visages | Moyenne | Risque légal sur la donnée brute | Stockage local SSD chiffré v1 ; floutage automatique avant tout partage externe (Phase 2, modèle ANPR + MTCNN) ; ne pas exporter de vidéos brutes |
+| Disclaimer "signal d'audit" insuffisant en cas de litige | Faible | Risque légal | Avis juridique requis avant tout usage du livrable hors cadre interne ; limitation de responsabilité explicite dans chaque rapport |
 
 ### 18.3 Risques projet
 
@@ -998,7 +964,6 @@ resources:
 - Publication du **dataset Quebec Pavement Winter Damage** sur HuggingFace Hub (CC-BY-NC).
 - DATASHEET.md selon Gebru et al. 2018 + croissant.json pour métadonnées ML.
 - Citation académique (CITATION.cff) si publication scientifique.
-- **Cofinancement CRSNG Alliance** avec firme partenaire et un labo de Poly/ÉTS/ULaval/McGill.
 
 ### 19.5 Cloud et passage à l'échelle
 
@@ -1035,7 +1000,6 @@ resources:
 | **Active learning loop** | Boucle d'amélioration : prédiction → correction humaine → ré-entraînement |
 | **Pré-annotation** | Génération automatique de bbox candidats par modèle open-vocab, à réviser par humain |
 | **Free provisioning** | Déploiement Xcode avec Apple ID gratuit (vs Apple Developer Program payant) |
-| **CRSNG Alliance** | Programme de cofinancement recherche-industrie du Conseil de recherches en sciences naturelles et en génie du Canada |
 | **Loi 25** | Loi modernisant la protection des renseignements personnels (Québec, en vigueur 2024) |
 
 ---
@@ -1043,16 +1007,12 @@ resources:
 ## 21. Décisions ouvertes (à valider en Phase 0)
 
 - [ ] Confirmer disponibilité de l'iPhone 16 Pro personnel pour le projet (matériel personnel, jamais de l'employeur)
-- [ ] Vérifier les règles internes d'activités accessoires de l'employeur — divulgation simple, ou autorisation formelle ?
-- [ ] Identifier 1 ingénieur civil pour validation IES en Phase 7 (réseau perso ou recommandation prof Poly/ÉTS)
-- [ ] Vérifier la licence commerciale exacte de RDD2022 (académique stricte ? CC-BY ? CC-BY-NC ?)
-- [ ] Déterminer le nom commercial des deux modules (PaveAudit / ChantierWatch sont des placeholders)
-- [ ] Choisir nom commercial de la plateforme : conserver "wsmd" comme nom interne, ou trouver un nom externe ?
-- [ ] Statuer sur l'incorporation : Inc., SENC, OBNL, autre ? Quand (avant premier pitch ou avant première facture) ?
-- [ ] Définir tarification cible : per-km, per-mandat, abonnement annuel, hybride ?
+- [ ] Identifier 1 ingénieur civil de référence pour validation IES en Phase 7
+- [ ] Vérifier la licence exacte de RDD2022 (académique stricte ? CC-BY ? CC-BY-NC ?)
 - [ ] Vérifier la disponibilité des permits OdP pour Longueuil et Sherbrooke en Phase 0 (sinon `GenericNoneAdapter` ou abandon zone)
-- [ ] Décider de l'audience de la première démo (firme prioritaire ou ville secondaire ?) — cadre le ton du rapport PDF
+
+**Décisions stratégie d'affaire** (hors PRD, traitées dans `docs/marketing/`) : nom commercial, incorporation, tarification, choix d'audience pour les premières démos, règles internes d'activités accessoires de l'employeur.
 
 ---
 
-*Fin du document. Version 4.0 — pivot évaluation d'état, 2026-04-27.*
+*Fin du document. 2026-04-27.*
