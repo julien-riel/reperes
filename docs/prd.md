@@ -1,645 +1,1058 @@
-# PRD — wsmd · Inventaire d'actifs municipaux par vision artificielle géoréférencée
+# PRD — wsmd · Plateforme d'audit automatisé d'actifs viaires municipaux
 
-**Version** : 3.0 (consolidé)
+**Version** : 4.0 (pivot évaluation d'état)
 **Date** : 2026-04-27
 **Statut** : draft, en attente de validation produit
 **Auteur** : Julien Riel, avec assistance Claude
-**Cible PoC** : Précision Niveau B (0.5–2 m) sur les objets détectés, validée empiriquement à Longueuil/Montréal
+**Cible PoC** : Deux modules vendables — PaveAudit (état de chaussée selon méthodo MTQ) et ChantierWatch (détection de chantiers + cross-check permits OdP), validés empiriquement à Montréal, Longueuil et Sherbrooke
 
-> Ce document est la **seule source de vérité produit** pour wsmd. Il remplace toute spec ou plan antérieur. Les spécifications d'implémentation (calibration, code, séquence des tâches) en découlent.
+> Cette version 4.0 **remplace** la version 3.0 (qui ciblait l'inventaire géoréférencé précis Niveau B). Le pivot stratégique vers l'évaluation d'état est documenté en §2.
+
+> Ce document est la **seule source de vérité produit** pour wsmd. Il remplace toute spec ou plan antérieur. Les spécifications d'implémentation (architecture, code, séquence des tâches) en découlent.
 
 ---
 
 ## 1. Vision
 
-Construire un **système de cartographie automatisée des actifs municipaux** qui, à partir d'un véhicule en circulation, détecte et géoréférence avec une précision sub-2 mètres l'inventaire d'état des éléments du domaine public : signalisation, mobilier urbain, marquage au sol, état de chaussée, présence de chantiers, graffitis.
+Construire une **plateforme d'audit automatisé d'actifs viaires municipaux** par captation vidéo géoréférencée depuis un véhicule, avec une **architecture pluggable d'évaluateurs spécialisés**.
 
-À long terme, ce système doit permettre à une municipalité (ou à un partenaire civic-tech) de **maintenir un inventaire vivant et géolocalisé** de son patrimoine viaire, mis à jour à chaque passage d'un véhicule équipé — par opposition aux inventaires manuels actuels, ponctuels et coûteux.
+Le PoC v1 livre **trois modules** :
+- **PaveAudit** — état de chaussée selon la méthodologie d'évaluation visuelle MTQ
+- **ChantierWatch** — détection de chantiers et cross-référencement avec les bases de permits d'occupation du domaine public (OdP) en open data municipal
+- **Annotation** — outil web local de révision/correction humaine des sorties d'évaluateurs, alimentant la boucle d'amélioration continue (active learning)
 
-À court terme, l'objectif est de **prouver la faisabilité technique** sur une zone test de quelques kilomètres carrés à Longueuil, avec un matériel grand public et une chaîne logicielle 100 % open source.
+L'architecture supporte l'ajout futur d'évaluateurs (signalisation, mobilier urbain, marquage, etc.) sans refonte du pipeline. **Chaque évaluateur a son propre protocole de validation, ses propres KPIs, et son propre livrable.**
+
+À court terme, l'objectif est de **prouver la faisabilité technique et commerciale** des deux modules sur trois zones tests représentatives, avec un matériel grand public et une chaîne logicielle 100 % open source.
+
+À long terme, ce système doit permettre à des **firmes de génie** de sous-traiter une partie de leurs audits visuels (économie de jp d'inspecteur), et à des **services d'inspection municipaux** de détecter les chantiers non-permittés sur leur territoire.
 
 ---
 
 ## 2. Contexte et motivation
 
-### 2.1 Pourquoi maintenant
+### 2.1 Pivot depuis la v3
 
-- Les **modèles de vision artificielle open-source** (YOLOv8/v11, Grounding-DINO, segmentation foundationale) atteignent en 2025 une qualité suffisante pour la signalisation urbaine, sans entraînement custom dans la majorité des cas.
-- Les **iPhone récents** (16 Pro et postérieurs) embarquent un GNSS bi-bande L1/L5 et une centrale inertielle de qualité, accessibles directement via `CoreLocation` + `CoreMotion` — un récepteur GNSS dédié n'est plus indispensable au Niveau B.
+La version 3.0 du PRD (inventaire d'actifs géoréférencés à précision Niveau B 0.5–2 m) a été abandonnée pour les raisons suivantes :
+
+- **Risque technique élevé** : la précision Niveau B en milieu urbain dense, sans matériel RTK, dépend de variables (heading magnétique, multipath GNSS, conditionnement de la triangulation N-vues) qui sont difficiles à maîtriser dans un side project.
+- **Faible fit commercial** : précision Niveau B (0.5-2 m) est trop imprécise pour les firmes de génie (qui veulent du Niveau C cm pour responsabilité légale) et trop précise pour les besoins informels (où Google Maps ou OpenStreetMap suffisent).
+- **Concurrence directe** : Mapillary (Meta), Trimble MX9, Leica Pegasus occupent ce créneau avec un avantage matériel structurel.
+
+Le pivot vers l'évaluation d'état :
+- **Réduit le risque technique** : la précision géométrique requise descend à ±10 m (segment de rue), résolue par snap-to-road sur Géobase/OSM. Les problèmes de heading, calibration extrinsèque, et triangulation disparaissent.
+- **Adresse un marché identifié** : RoadBotics (Michelin Mobility Intelligence), Vialytics, Carbin opèrent ce marché avec des modèles SaaS à 5–50 k$/an par municipalité. Le marché existe, il est mal servi au Québec.
+- **Crée un moat québécois** : aucun concurrent n'est entraîné sur les défauts hivernaux du Québec, ne reconnaît la signalisation MUTCD-Québec, ni n'intègre les données ouvertes municipales québécoises (Données Québec, Géobase, permits OdP).
+
+### 2.2 Pourquoi maintenant
+
+- Les **modèles open-vocabulary** (Grounding DINO, YOLO-World, SAM) atteignent en 2025-2026 une qualité suffisante pour la pré-annotation automatique sur classes arbitraires définies par texte. Cela réduit drastiquement le coût d'annotation initial.
+- Les **iPhone récents** (16 Pro et postérieurs) embarquent un GNSS bi-bande, une centrale inertielle de qualité, et une caméra 4K HDR ProRes — accessibles directement via `AVFoundation` + `CoreLocation` + `CoreMotion`. Un dispositif unique remplace ce qui demandait précédemment caméra + GNSS + IMU + ordinateur de captation.
+- Les **données ouvertes municipales** (Géobase, permits OdP, entraves planifiées) sont publiées en continu par Montréal et plusieurs villes secondaires. Le cross-référencement automatique est une fonctionnalité unique sur le marché.
 - Les **standards OGC API Features** sont matures et adoptés par les SIG modernes (QGIS, Esri, géoportails municipaux). Une livraison standard est immédiatement consommable.
-- Les **données ouvertes municipales** (Géobase, bornes-fontaines, lampadaires, arbres, abribus, mobilier urbain inventorié) fournissent des **landmarks de recalage** quasi-gratuits qui améliorent matériellement la précision absolue. La disponibilité varie d'une municipalité à l'autre — le PoC s'adapte aux jeux disponibles dans la zone test.
 
-### 2.2 Le problème côté municipalité
+### 2.3 Le problème côté client
 
-Les villes québécoises (Longueuil, Montréal et autres) maintiennent un inventaire de leurs actifs viaires principalement par :
-- Relevés de cols bleus à pied ou en tournée — coûteux, ponctuels, vite obsolètes.
-- Photos aériennes — précision absolue OK, mais résolution insuffisante pour l'état (marquage effacé, graffiti, chantier actif).
-- Signalements citoyens (ex. Montréal-info) — réactif, partiel, biais de couverture.
+**Pour les firmes de génie** (WSP, Englobe, CIMA+, EXP, SNC) :
 
-Aucune de ces approches ne produit un **inventaire dense, fréquent et standardisé**. C'est le créneau qu'attaque wsmd.
+Les firmes sous-traitent fréquemment des **audits PCI/MTQ** sur des mandats de la voirie (MTQ, municipalités). Ces audits requièrent un inspecteur certifié inspectant visuellement des kilomètres de chaussée — typiquement 5-10 km/jp. À ~600-800 $/jp facturés, un mandat de 200 km coûte 25-40 jp d'inspecteur.
 
-### 2.3 Pourquoi un PoC plutôt qu'un produit fini
+**Si un système automatisé pré-classifie 80 % des défauts à 75 %+ d'agreement avec un inspecteur certifié**, l'inspecteur passe en mode "vérification ciblée" : 1-2 h par segment au lieu de 1-2 h par kilomètre. **Économie estimée : 60-70 % des jp d'inspecteur.**
 
-La chaîne complète (capture → détection → géoréférencement précis → livraison OGC) implique plusieurs maillons techniques **dont aucun n'est trivial à seul**, et dont l'**addition d'erreurs** est l'enjeu central.
+**Pour les services d'inspection municipaux** :
 
-Avant d'investir dans :
-- Du matériel professionnel (récepteur RTK, ZED stéréo)
-- Un fine-tuning dataset Quebecois
-- Une intégration municipale (contrats, SLA)
-
-…il faut **mesurer empiriquement** la précision atteignable avec du matériel grand public sur une zone test représentative. C'est le rôle de ce PoC.
+Les villes publient les permits OdP en open data, mais aucun système ne croise ces données avec une vérification terrain automatisée. Les **chantiers non-déclarés** (entrepreneurs sans permit, occupations illégales, signalisation manquante) sont détectés au cas par cas, par signalement citoyen ou inspection ponctuelle. Une plateforme qui flag systématiquement les zones de chantier sans correspondance permit produit un signal d'audit à valeur de redressement directe (amendes + frais de mise en conformité).
 
 ### 2.4 Ce que **n'est pas** wsmd à ce stade
 
-- Ce n'est **pas** un produit clé-en-main à vendre à une municipalité. C'est un PoC de faisabilité.
-- Ce n'est **pas** un dataset publié sur HuggingFace Hub à cette étape (l'ouverture éventuelle est Phase 2+).
-- Ce n'est **pas** une plateforme multi-utilisateurs avec interface validateur. Une UI de validation existera si nécessaire pour qualifier la précision, pas comme produit final.
-- Ce n'est **pas** un système temps réel en production. Le pipeline est **post-captation** sur Mac.
+- Ce n'est **pas** un outil de positionnement précis Niveau B/C (cf. abandon v3).
+- Ce n'est **pas** un système temps réel — toute évaluation est post-captation.
+- Ce n'est **pas** un service SaaS multi-utilisateurs avec auth/dashboard. Le PoC v1 est mono-utilisateur, localhost.
+- Ce n'est **pas** un produit clé-en-main certifié pour responsabilité légale. Le livrable est un *signal d'audit*, pas une *preuve* — la décision d'enforcement reste au client.
+- Ce n'est **pas** un outil de mesure d'IRI (International Roughness Index). PaveAudit produit l'**indice visuel uniquement** (équivalent IES MTQ). Le complément IRI nécessiterait l'exploitation des accéléromètres iPhone — Phase 2.
 
 ---
 
-## 3. Audiences et cas d'usage
+## 3. Cadre éthique et conflits d'intérêts
 
-### 3.1 Audiences
+L'auteur est employé dans le secteur municipal québécois. Le projet wsmd est strictement **personnel et générique**, sans lien avec ses fonctions d'emploi. La discipline suivante est appliquée et inscrite au PRD pour traçabilité :
 
-| Audience | Quoi qu'elle attend | Période d'intérêt |
-|---|---|---|
-| Équipe interne (1–2 dev) | Prouver la faisabilité technique Niveau B | PoC (8 semaines) |
-| Décisionnaires municipaux | Voir une démo cartographique convaincante avec chiffres de précision | Fin de PoC |
-| Partenaires civic-tech (ex. CIRANO, Polytechnique, éditeurs SIG) | Échanges scientifiques, recalage croisé, dataset partagé | Phase 2 |
-| Citoyens (long terme) | Cartes ouvertes des actifs municipaux | Production, hors PoC |
+### 3.1 Discipline en exécution
 
-### 3.2 Cas d'usage cibles
+- Aucune captation vidéo dans la municipalité-employeur de l'auteur, à aucune phase du projet.
+- Aucune utilisation de données, documents, outils, équipements ou systèmes appartenant à l'employeur.
+- Aucun travail sur le projet effectué pendant les heures rémunérées par l'employeur.
+- Le PRD et tous les livrables ne référencent ni ne traitent aucun cas spécifique à la municipalité-employeur.
+- Les zones de test sont sélectionnées dans des municipalités tierces (Montréal, Longueuil, Sherbrooke) sans relation avec l'employeur.
 
-**Cas d'usage 1 — Inventaire de signalisation**
-> Un véhicule équipé fait une boucle de 5 km à Longueuil. À l'arrivée, la carte affiche tous les panneaux STOP, CÉDEZ, vitesse, etc. avec leur position à <2 m près. Cliquer sur un panneau ouvre la frame d'origine + classe + score de confiance.
+### 3.2 Discipline avant commercialisation
 
-**Cas d'usage 2 — État de chaussée localisé**
-> Le même véhicule capture aussi des défauts de chaussée (nids-de-poule, fissures majeures). À l'arrivée, une carte de chaleur des défauts localise les zones les plus dégradées.
+- **Divulgation à l'autorité d'éthique** ou au service RH de l'employeur, conformément aux règles internes d'activités accessoires (à vérifier en Phase 0).
+- **Vérification de la conformité** au code d'éthique applicable (Loi sur l'éthique et la déontologie en matière municipale, RLRQ c E-15.1.0.1, ou règlement interne employeur, selon le cas).
+- **Incorporation d'une entité juridique distincte** (probablement Inc. ou SENC) avant toute facturation ou contractualisation, pour clairement séparer les patrimoines.
+- **Aucun pitch ni vente** à la municipalité-employeur ni à ses fournisseurs/sous-traitants directs identifiés, pour éviter tout soupçon de conflit ou d'avantage indu.
 
-**Cas d'usage 3 — Comparaison temporelle**
-> Le même trajet est repassé à 1 mois d'écart. Le système flagge les **disparitions** (panneau enlevé/abîmé) et **apparitions** (nouveau chantier, nouveau graffiti).
+### 3.3 Audit interne du PRD
 
-**Cas d'usage 4 — Couche WFS pour SIG municipal** *(Phase 2)*
-> Le service de la voirie consomme la couche `detected_assets` directement dans QGIS via OGC API Features. Les détections sont superposées à leur référentiel SIG existant.
+Si une partie du PRD venait à manquer à cette discipline (par exemple, en faisant référence à un dossier interne, en réutilisant un standard maison, ou en citant des chiffres confidentiels), l'auteur s'engage à corriger immédiatement. Aucune telle référence n'est connue à la date de rédaction.
 
 ---
 
-## 4. Hypothèse produit
+## 4. Audiences et cas d'usage
 
-> Avec un **iPhone 16 Pro (master GNSS+IMU)**, une **caméra Brio 4K (calibrée)** et un **MacBook Air**, en utilisant des **modèles CV open-source pré-entraînés** + **multi-frame triangulation** + **recalage sur landmarks municipaux ouverts**, on peut produire un **inventaire géoréférencé d'actifs municipaux à précision Niveau B (0.5–2 m)** sans matériel spécialisé ni récepteur RTK.
+### 4.1 Audiences cibles
 
-Si cette hypothèse est validée, elle débloque une voie pragmatique vers un produit déployable — sans le coût matériel et la complexité d'un système de mobile mapping professionnel.
+| Audience | Cas d'usage primaire | Module pertinent | Cycle de vente |
+|---|---|---|---|
+| Firmes de génie sous-traitant des audits MTQ/municipaux (WSP, Englobe, CIMA+, EXP, SNC, Englobe Géomatique) | Pré-classement d'inspection visuelle, économie de jp d'inspecteur certifié | PaveAudit | 3-6 mois |
+| Services d'inspection / conformité de villes secondaires québécoises | Détection automatisée de chantiers sans permit, audit de conformité | ChantierWatch | 6-12 mois |
+| Universités (Phase 2) — Polytechnique, ÉTS, ULaval, McGill | Cofinancement CRSNG Alliance avec firme partenaire ; dataset Quebec hivernal pour publication | Tous + dataset | 12-18 mois |
 
-Si elle est invalidée, on saura **où** se situe le maillon faible (heading, GNSS, triangulation, classification) et on pourra investir de manière ciblée (Niveau C avec RTK ; meilleure caméra ; modèle fine-tuné).
+**Hors-cible explicite** : la municipalité-employeur de l'auteur ; ses fournisseurs et sous-traitants directs ; les acteurs avec qui l'auteur est en relation professionnelle dans son emploi principal.
+
+### 4.2 Cas d'usage cibles
+
+**Cas d'usage 1 — Audit PCI/MTQ pour firme de génie**
+
+> Une firme reçoit un mandat MTQ de 200 km à inspecter visuellement. Au lieu de mobiliser 30 jp d'inspecteur, elle équipe un véhicule d'un iPhone wsmd, fait deux journées de captation, lance le pipeline, et reçoit un GeoPackage + rapport PDF pré-classifiant les défauts. Un inspecteur certifié relit en 5-7 jp pour valider et signer le livrable.
+
+**Cas d'usage 2 — Audit de conformité chantier pour ville secondaire**
+
+> Le service d'inspection d'une ville de 100 k habitants publie ses permits OdP. Il fait un tour de 30 km mensuel avec wsmd, le système croise les zones de chantier détectées avec les permits actifs, produit une liste de "potentiels chantiers non-permittés à vérifier sur le terrain". L'inspecteur cible ses visites au lieu de patrouiller à l'aveugle.
+
+**Cas d'usage 3 — Recherche académique financée**
+
+> Un labo de Polytechnique obtient une subvention CRSNG Alliance avec une firme de génie co-investisseuse pour étudier la "détection automatisée de dégradations hivernales par CV embarquée". wsmd fournit la chaîne technique, le labo fournit les ressources d'annotation et la publication.
 
 ---
 
-## 5. Périmètre du PoC
+## 5. Hypothèse produit
 
-### 5.1 In-scope
+> Avec un **iPhone 16 Pro** mounté au pare-brise (caméra 4K + GNSS + IMU dans un seul device), des **modèles CV pré-entraînés fine-tunés sur dataset Québec hivernal**, une **boucle de pré-annotation par modèles open-vocabulary** (Grounding DINO / YOLO-World) accélérant le bootstrap, et un **pipeline post-captation Mac**, on peut livrer :
+>
+> - Un **classement IES (Indice d'État Subjectif) automatisé** atteignant **κ Cohen ≥ 0.6** (substantial agreement) avec un ingénieur civil de référence sur classes MTQ, sur réseau urbain et tronçon municipal.
+> - Une **détection de chantiers** à **≥ 85 % de recall** avec cross-référencement automatique aux bases open data de permits OdP, isolant les détections sans correspondance avec **≥ 90 % de précision sur le verdict `unmatched`**.
 
-- **Capture** synchronisée vidéo Brio 4K + GNSS/IMU iPhone, 30 min à 2 h par session
-- **Détection** des classes suivantes via modèle CV pré-entraîné :
-  - Signalisation : panneaux directionnels, STOP, CÉDEZ, limite de vitesse
-  - Mobilier urbain : lampadaires, bancs, poubelles, abribus
-  - **Repères fixes géoréférencés** disponibles dans les open data municipaux (bornes-fontaines, lampadaires, arbres inventoriés, etc.) — utilisés comme **landmarks de recalage** ; la liste exacte dépend des jeux de données ouverts dans la zone test
-  - Cônes / barrières / véhicules de chantier
-- **Tracking** multi-frame avec ID stable (ByteTrack ou équivalent)
-- **Géoréférencement** par triangulation multi-vues + projection NAD83 MTM zone 8
-- **Recalage** optionnel sur bornes-fontaines géoréférencées (Données Québec)
-- **Livraison OGC API Features** via pygeoapi sur GeoPackage
-- **Validation empirique** sur 15–20 panneaux de référence à position connue
+**Précondition critique** : ces objectifs ne sont atteints qu'**après la Phase 1 d'annotation** (bootstrap dataset Québec via pré-annotation + révision humaine). En sortie de Phase 0, les modèles pré-entraînés out-of-the-box donneront une baseline ~60 % mAP — c'est attendu, c'est le point de départ.
 
-### 5.2 Out-of-scope du PoC (revisités en Phase 2+)
+Si cette hypothèse est validée, elle débloque :
+- Un service de sous-traitance d'audit visuel facturable au km, vendable aux firmes de génie.
+- Un service d'audit de conformité chantier vendable aux villes secondaires.
+- Une crédibilité technique pour des subventions de recherche (CRSNG, Mitacs, FRQ).
 
-- Détection d'**état** des actifs (panneau penché, graffité, marquage effacé, chaussée dégradée détaillée)
-- Interface de **validation manuelle** par un humain
-- Annotation **multi-passes** ou **dataset publication** (HF Hub)
-- Détection en **temps réel** (le PoC est post-captation)
-- Précision **Niveau C** (<20 cm — nécessite RTK)
-- **Floutage automatique** plaques/visages
-- Capture **multi-véhicule** ou **mobile mapping continu**
+Si elle est invalidée, l'auteur saura **où** se situe le maillon faible (qualité dataset, fine-tuning, couplage permits, ergonomie annotation) et pourra investir de manière ciblée.
+
+---
+
+## 6. Périmètre du PoC v1
+
+### 6.1 In-scope
+
+- **App iOS de captation tout-en-un** (Swift/SwiftUI) : vidéo 4K H.265 + GNSS + IMU + heading vrai, persistance locale, transfert post-session vers Mac.
+- **Pipeline post-captation Mac** (Python 3.12) : ingestion, pré-annotation, évaluation, livraison.
+- **Module PaveAudit** : détection de défauts de chaussée selon catalogue MTQ (8 classes), agrégation par segment routier, calcul IES, livrable cartographique.
+- **Module ChantierWatch** : détection de zones de chantier (cônes, barrières, signalisation temporaire, véhicules construction, clôtures privées, déblais), cross-référencement avec permits OdP, flag des `unmatched`.
+- **Module Annotation** : outil web local FastAPI + SvelteKit pour révision humaine des sorties évaluateurs et export de gold labels pour ré-entraînement.
+- **Boucle active learning** : pré-annotation Grounding DINO/YOLO-World → révision humaine → fine-tune → ré-évaluation, avec versioning des poids (manifest manuel + dossier).
+- **Livraison OGC API Features** via pygeoapi sur GeoPackage + rapport PDF par session (template Quarto).
+- **Validation empirique** sur 3 zones : Montréal (richesse de données + debug), Longueuil (réseau intermédiaire), Sherbrooke (portabilité données pauvres).
+
+### 6.2 Out-of-scope v1 (architecture les supportera, mais pas implémentés)
+
+- Évaluateur **état signalisation** (panneaux penchés, graffités, effacés)
+- Évaluateur **mobilier urbain** (état des lampadaires, abribus, bancs, poubelles)
+- Évaluateur **marquage chaussée** (lignes effacées, manquantes)
+- **Détection d'accidents et urgences** en temps réel
+- **Mesure IRI** par accéléromètres (Phase 2)
+- **Dashboard web multi-utilisateurs** ou plateforme SaaS
 - **API d'écriture** (le service OGC est read-only)
 - **Authentification** / contrôle d'accès du service OGC
+- **Floutage automatique** plaques d'immatriculation et visages (à ajouter avant tout partage externe — Phase 2)
+- **Comparaison temporelle** multi-passages
+- **Mode mobile mapping continu** sur véhicules municipaux
 
-### 5.3 Engagements de précision (PoC seul)
+### 6.3 Engagements de qualité (PoC v1)
 
-| Métrique | Cible | Méthode de mesure |
+| Module | Métrique | Cible |
 |---|---|---|
-| Erreur médiane sur panneaux de référence | < 1.5 m | Distance euclidienne détection vs vérité |
-| CEP95 (95e centile de l'erreur radiale) | < 2.5 m | Distribution sur 15+ panneaux |
-| Taux de détection des panneaux visibles | > 85 % | Comptage manuel sur la même vidéo |
-| Répétabilité entre 3 passages | < 1 m | Écart inter-passage de la même détection |
+| PaveAudit | κ Cohen sur classification IES MTQ vs ingénieur référence | ≥ 0.6 |
+| PaveAudit | mAP par classe de défaut | ≥ 0.75 |
+| PaveAudit | Erreur IES moyenne par segment | ±10 / 100 |
+| ChantierWatch | Recall détection zones de chantier | ≥ 85 % |
+| ChantierWatch | Précision verdict `unmatched` | ≥ 90 % |
+| ChantierWatch | F1 cross-check temporel permits | ≥ 0.85 |
+| Annotation | Vitesse médiane révision post-pré-annotation | ≤ 30 s/item |
+| Pipeline global | Temps traitement / heure de vidéo (Mac M-series) | ≤ 2× temps réel |
 
 ---
 
-## 6. Architecture cible
+## 7. Architecture
+
+### 7.1 Vue d'ensemble
 
 ```
-┌──────────────────────────────────────┐    ┌──────────────────────────────────┐
-│  iPhone 16 Pro (mount véhicule)     │    │  Logitech Brio 4K               │
-│  ───────────────────────────────    │    │  ───────────────────────────    │
-│  • App Swift native (SwiftUI)        │    │  • Mount succion pare-brise     │
-│  • CoreLocation @ 10 Hz              │    │  • USB 3.0 vers Mac             │
-│    (kCLLocationAccuracyBestForNav)   │    │  • 4K @ 30 fps, MJPEG/H.264     │
-│  • CoreMotion @ 100 Hz               │    │  • Autofocus + auto-exposure    │
-│    (xMagneticNorthZVertical)         │    │    verrouillés                  │
-│  • Heading vrai (corrigé déclinaison)│    │                                 │
-│  • Server WebSocket Bonjour          │    │                                 │
-│  • Logging local CSV de backup       │    │                                 │
-└─────────────┬────────────────────────┘    └────────────┬─────────────────────┘
-              │ Wi-Fi local (hotspot iPhone               │ USB 3.0
-              │  ou réseau partagé)                       │
-              ↓                                            ↓
-        ┌──────────────────────────────────────────────────────────┐
-        │  MacBook Air M-series (24 GB / 1 TB + SSD externe 2 TB) │
-        │  ──────────────────────────────────────────────────────  │
-        │  Pipeline temps de captation :                           │
-        │    • Capture Brio (OpenCV + AVFoundation)                │
-        │    • Client WebSocket consommant flux iPhone             │
-        │    • Écriture session_dir sur SSD externe                │
-        │                                                          │
-        │  Pipeline post-captation :                               │
-        │    • Synchronisation horaire (NTP partagé)               │
-        │    • Détection YOLO + ByteTrack (PyTorch MPS)            │
-        │    • Interpolation pose 6-DOF par frame                  │
-        │    • Triangulation multi-frame (bundle adjustment)       │
-        │    • Reprojection NAD83 MTM zone 8 (EPSG:32188)          │
-        │    • Recalage optionnel sur bornes-fontaines             │
-        │    • Export GeoPackage (`assets.gpkg`)                   │
-        │                                                          │
-        │  Livraison :                                             │
-        │    • pygeoapi (OGC API Features) sur GeoPackage          │
-        │    • Visualisation QGIS via WFS                          │
-        └──────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────┐
+│  iPhone 16 Pro (mount pare-brise) — DEVICE UNIQUE │
+│  ────────────────────────────────────────────────  │
+│  App SwiftUI native                                 │
+│    • AVCaptureSession 4K H.265 (AF/AE/WB locked)   │
+│    • CoreLocation (GNSS @ 1–10 Hz)                  │
+│    • CoreMotion (IMU 100 Hz, x-magnetic-north)     │
+│    • CLHeading (cap vrai, déclinaison corrigée)    │
+│    • Persistance locale → session bundle           │
+└──────────────────────┬─────────────────────────────┘
+                       │ Transfert post-session
+                       │ (AirDrop / USB / SMB)
+                       ↓
+┌────────────────────────────────────────────────────┐
+│  MacBook M-series — pipeline post-captation        │
+│  ────────────────────────────────────────────────  │
+│  wsmd ingest <session>      ← validation + index   │
+│  wsmd preannotate <session> --prompts <yaml>       │
+│  wsmd annotate <session>    ← UI web vérification  │
+│  wsmd evaluate --modules X  ← lance évaluateurs    │
+│    ┌──────────────┐  ┌────────────────┐  ┌─────┐  │
+│    │  PaveAudit   │  │  ChantierWatch │  │ ... │  │
+│    └──────┬───────┘  └────────┬───────┘  └──┬──┘  │
+│           ↓                   ↓             ↓     │
+│        ┌──────────────────────────────────────┐   │
+│        │  GeoPackage assets.gpkg (multi-layer)│   │
+│        └──────────────────────────────────────┘   │
+│  wsmd export-labels <session>  → dataset YOLO/COCO │
+│  wsmd train --module X         → fine-tune custom  │
+│  wsmd report <session>      ← PDF + GPKG final    │
+│  wsmd serve                  ← pygeoapi (OGC)      │
+└────────────────────────────────────────────────────┘
 ```
 
-### 6.1 Topologie disque
+**Principe clé** : la captation produit un bundle de session **fixe et standard**. Les évaluateurs sont des **plugins indépendants** (Python entry points) qui consomment ce bundle et écrivent leurs résultats dans des layers GeoPackage distincts. Aucun couplage entre évaluateurs.
+
+### 7.2 Topologie disque
 
 ```
 data/
-  landmarks/                 # cache local des jeux open data municipaux (R-tree-indexé)
-    longueuil/
-      bornes_fontaines.gpkg
-      lampadaires.gpkg
-      arbres.gpkg
-      ...
-    montreal/
-      ...
-  geobase/                   # cache Géobase (tronçons de rue)
-    troncons.geojson
+  permits/                       # cache local des permits OdP par ville
+    montreal/entraves_2026.gpkg
+    longueuil/permits_2026.gpkg  # si disponible
+    sherbrooke/...
+  geobase/                        # cache Géobase Québec (référentiel routier)
+    troncons_qc.gpkg
+  models/                         # poids fine-tunés versionnés (option B)
+    pave_audit_v1.pt
+    pave_audit_v2.pt
+    chantier_watch_v1.pt
+    MANIFEST.yaml                 # mapping version ↔ commit Git ↔ dataset ↔ métriques
+  prompts/                        # versionnés Git
+    pave_audit.yaml
+    chantier_watch.yaml
 
 sessions/
   2026-04-27_14-30-00_<uuid>/
-    config.yaml              # paramètres caméra, mount véhicule, calibration intrinsèque
-    metadata.json            # début/fin, version Git pipeline, conditions météo
-    video.mp4                # flux Brio brut (≈11 GB/h en 4K)
-    frames.csv               # frame_idx, ts_iso (par frame)
-    gnss.jsonl               # samples GNSS au format JSON-Lines (un par ligne)
-    imu.jsonl                # samples IMU 100 Hz
-    detections.csv           # frame_idx, track_id, class, bbox, conf
-    poses.csv                # frame_idx, lat, lon, alt, roll, pitch, yaw (interpolé)
-    assets.gpkg              # output final (+ layers de debug, copie des landmarks utilisés)
-    validation_report.md     # erreurs mesurées vs vérité terrain
+    manifest.json                 # device, version app, calibration, conditions
+    video.mp4                     # 4K H.265, AF/AE/WB verrouillés
+    frames.jsonl                  # frame_idx, ts_iso (extrait au post-traitement)
+    gnss.jsonl                    # samples GNSS
+    imu.jsonl                     # samples IMU 100 Hz
+    heading.jsonl                 # samples cap vrai
+    assets.gpkg                   # output multi-layer (un layer par évaluateur)
+    report.pdf                    # rapport client final
+    validation_report.md          # erreurs mesurées vs vérité (si validation lancée)
+```
+
+### 7.3 Architecture évaluateurs
+
+**Interface évaluateur (registry pattern via Python entry points)** :
+
+```python
+class Evaluator(Protocol):
+    name: str                         # ex. "pave_audit"
+    output_layers: list[str]          # tables GeoPackage produites
+    
+    def configure(self, cfg: dict) -> None: ...
+    def evaluate(self, session: Session) -> EvaluatorResult: ...
+    def validate(self, result, ground_truth: Path) -> Metrics: ...
+```
+
+**Découverte automatique** via le entry point group `wsmd.evaluators` → ajouter un nouveau module = un nouveau package Python qui s'enregistre. Aucune modification du core.
+
+**Pipeline d'exécution** par évaluateur, en série (parallélisable plus tard) :
+1. Charge le bundle de session
+2. Extrait frames + interpole pose/heading par frame
+3. Inférence CV (modèle propre à l'évaluateur)
+4. Géoréférence les détections (snap-to-road via OSRM Docker)
+5. Logique métier propre (cross-check permits, calcul IES, etc.)
+6. Écrit ses layers dans le GeoPackage de session
+
+**CLI** :
+```bash
+wsmd ingest 2026-04-27_14-30-00_*/
+wsmd preannotate <session> --prompts prompts/pave_audit.yaml
+wsmd annotate <session>                                # ouvre UI web localhost
+wsmd evaluate <session> --modules pave_audit,chantier_watch
+wsmd export-labels <session>                            # exporte gold labels YOLO/COCO
+wsmd train --module pave_audit --dataset <dir>         # fine-tune custom
+wsmd report <session> --format pdf
+wsmd serve                                              # pygeoapi http://localhost:5000
 ```
 
 ---
 
-## 7. Stack technique
+## 8. Stack technique
 
 | Couche | Choix | Justification |
 |---|---|---|
-| App mobile | Swift / SwiftUI / CoreLocation / CoreMotion | Accès direct GNSS bi-bande L1/L5 + IMU haute fréquence ; déploiement free-provisioning suffit |
-| Communication temps réel | WebSocket sur Bonjour (`_munigps._tcp`) | Découverte automatique sur réseau local, latence faible, indépendant du Wi-Fi externe |
-| Capture vidéo | Python + OpenCV (backend AVFoundation) | API stable, contrôle UVC pour verrouiller AF/AE, intégration directe avec le pipeline |
-| Détection CV | Ultralytics YOLOv8 ou v11 + ByteTrack | Pré-entraîné COCO + extensions traffic-sign disponibles ; bonne perf MPS Apple Silicon |
-| Inférence | PyTorch MPS | Pas de CUDA dispo sur Mac ; MPS donne performance correcte pour 4K @ 1–2 fps de traitement |
-| Géoréférencement | OpenCV + pymap3d + scipy.optimize.least_squares | Standard mature, bundle adjustment N-vues simple à implémenter |
-| Reprojection cartographique | pyproj | EPSG:32188 (NAD83 MTM zone 8) pour cohérence avec les SIG municipaux du Québec |
-| Stockage | GeoPackage (SQLite) | Format OGC standard, lisible par QGIS, ArcGIS, GDAL ; auto-suffisant |
-| Service web | pygeoapi (Python) | Implémentation OGC API Features de référence, configuration YAML, pas de stack web lourde |
-| Visualisation | QGIS | Standard SIG ouvert, consommation OGC native, scriptable Python |
-| Versioning code | Git | Standard |
-| Versioning data | DVC ou Git LFS (à arbitrer) | Vidéos brutes ne vont pas sur Git |
-| Environnement Python | venv + Python 3.12+ | Pas de docker côté Mac, ferré sur l'OS |
+| App iOS | Swift / SwiftUI / AVFoundation / CoreLocation / CoreMotion | Single-device, contrôle natif des verrouillages caméra |
+| Stockage session | Bundle structuré (mp4 + jsonl) sur iPhone, transfert post-session | Pas de réseau temps réel = simplicité, robustesse |
+| Pipeline | Python 3.12 + venv | MPS PyTorch, écosystème CV mature |
+| Frame extraction | ffmpeg + opencv-python | Standard, contrôle codecs |
+| Inférence CV | PyTorch MPS + Ultralytics YOLOv8/v11 | Apple Silicon natif |
+| Pré-annotation open-vocab | Grounding DINO (HF `IDEA-Research/grounding-dino-tiny`) ET/OU YOLO-World (Ultralytics) | Bootstrap zéro-shot via prompts texte |
+| Modèles base chaussée | RDD2022 + fine-tune Québec hivernal | Dataset ouvert + adaptation locale |
+| Modèles base chantier | YOLOv8 COCO + fine-tune cônes/barrières/déblais QC | COCO partiellement, fine-tune léger |
+| Format prompts | YAML versionnés Git par module | Source de vérité texte, pas dans le code |
+| Orchestration plugins | Python entry points + Click CLI | Pattern standard, zéro framework |
+| Géoréférencement | pyproj (EPSG:32188 NAD83 MTM zone 8), shapely | Cohérence avec SIG QC |
+| Snap-to-road | **OSRM en Docker local** | Powerful, open-source, supporte routing + map matching |
+| Cache permits | GeoPackage local + R-tree | Sub-ms par requête |
+| Stockage résultats | GeoPackage (SQLite) | OGC standard, lisible QGIS/ArcGIS/GDAL |
+| Service web | pygeoapi | OGC API Features de référence |
+| Outil annotation | FastAPI backend + SvelteKit frontend | Web local léger, raccourcis clavier ergonomiques |
+| Rapport PDF | Quarto + Jinja2 templates | Templating moderne, livrable pro |
+| Versioning code | Git + GitHub privé (v1) | Standard |
+| Versioning poids ML | Manifest YAML manuel + dossier `models/` (option B) | Simple, suffit pour solo + side project |
+| Versioning data | DVC vers bucket B2 (Phase 2) | Plus tard si besoin |
+| Tests | pytest + golden frames annotées | Régression CV par évaluateur |
 
 ---
 
-## 8. Pipeline de capture
+## 9. Pipeline de captation iOS
 
-### 8.1 App iOS — exigences fonctionnelles
+### 9.1 Exigences fonctionnelles de l'app
 
-L'app iPhone est le **maître temporel et spatial** du système. Elle doit :
+L'app iPhone est un **device autonome** qui capture tout sur place et transfère post-session. Elle doit :
 
-1. Logger en continu **GNSS** à la fréquence native (typiquement 1 Hz, parfois 10 Hz) avec `kCLLocationAccuracyBestForNavigation`.
-2. Logger **IMU à 100 Hz** via `CMDeviceMotion` en mode `xMagneticNorthZVertical` (orientation absolue avec correction nord magnétique).
-3. **Corriger la déclinaison magnétique** (≈14° W à Montréal/Longueuil) pour obtenir le heading vrai.
-4. **Persister localement** les flux dans des CSV (sécurité en cas de coupure Wi-Fi).
-5. **Diffuser en temps réel** les samples via WebSocket pour qu'un consommateur (le Mac) puisse les enregistrer en parallèle.
-6. Demander les permissions : `NSLocationAlwaysAndWhenInUseUsageDescription`, `NSMotionUsageDescription`, `NSLocalNetworkUsageDescription`, capability "Location updates" en background.
-7. Déploiement : free Apple ID via Xcode 16+, profil de confiance accepté manuellement sur le device.
+1. Capturer la **vidéo en 4K H.265** via `AVCaptureSession` avec :
+   - `lockForConfiguration` + `setExposureMode(.locked)` (verrouillage exposition)
+   - `setFocusMode(.locked)` (verrouillage AF)
+   - `setWhiteBalanceMode(.locked)` (verrouillage WB)
+   Les verrouillages se font après une scène de calibration courte (5-10 sec en début de session, scène typique du parcours).
+2. Logger **GNSS** via `kCLLocationAccuracyBestForNavigation` à la fréquence native (typiquement 1 Hz, parfois 10 Hz).
+3. Logger **IMU à 100 Hz** via `CMDeviceMotion` en mode `xMagneticNorthZVertical`.
+4. Logger le **cap vrai** via `CLHeading.trueHeading` (correction déclinaison magnétique automatique par iOS).
+5. Persister localement les flux dans le bundle de session (mp4 + jsonl), zéro réseau pendant la captation.
+6. Demander les permissions : `NSLocationWhenInUseUsageDescription`, `NSMotionUsageDescription`, `NSCameraUsageDescription`, capability "Location updates" en background.
+7. Transfert post-session : AirDrop, USB, ou montage SMB sur le Mac.
+8. Déploiement : free-provisioning Apple ID + Xcode 16+ pour usage personnel et démos. Apple Developer Program (99 $/an) seulement quand un partenaire externe doit l'installer.
 
-**Note** : l'iPhone 16 Pro est confirmé bi-bande L1/L5 mais Apple n'expose pas l'indicateur de bandes utilisées via API publique. La précision empirique se mesure par `horizontalAccuracy`.
+### 9.2 Calibration
 
-### 8.2 App Mac — pipeline de capture
-
-Script Python `wsmd capture` (à concevoir) qui en parallèle :
-
-- Ouvre le flux Brio via OpenCV avec contrôles UVC (verrouillage AF/AE, FOV, exposition manuelle).
-- Se connecte au WebSocket Bonjour de l'iPhone.
-- Écrit la vidéo H.264/MP4 dans `session_dir/video.mp4` à 30 fps.
-- Logge un timestamp ISO 8601 par frame dans `frames.csv`.
-- Logge les samples GNSS et IMU en JSON-Lines.
-- Affiche un HUD minimal : compteur de frames, lat/lon courante, taux GNSS, désynchro estimée.
-
-### 8.3 Synchronisation temporelle
-
-**Pour Niveau B**, NTP partagé sur les deux devices suffit (résiduel attendu : 10–50 ms).
-
-- Mac : `sudo sntp -sS time.apple.com` au début de chaque session (à scripter).
-- iPhone : Réglage automatique de l'heure activé (NTP géré par iOS).
-- À documenter dans le `metadata.json` : delta horaire mesuré en début et fin de session.
-
-Pour aller plus loin (futur Niveau C) : ping/pong WebSocket initial pour mesurer `clock_offset_ms` exact et compenser logiciellement.
-
-### 8.4 Calibration
-
-**Calibration intrinsèque caméra** : à faire **une fois** avant tout usage opérationnel.
+**Calibration intrinsèque caméra** : à faire **une fois** avant tout usage opérationnel, par modèle d'iPhone.
 - Damier d'échiquier 10×7, taille 25 mm.
-- 25–40 images variées en 4K, **AF verrouillé**.
+- 25–40 images variées en 4K, AF verrouillé sur la même scène.
 - OpenCV `calibrateCamera` → `K` (matrice intrinsèque) + `D` (distorsion).
 - Critère d'acceptation : erreur de reprojection RMS < 0.5 pixel.
-- Sauvegarde : `config/brio_calibration.yaml`.
+- Sauvegarde : `config/iphone_<model>_calibration.yaml`, embarqué dans le manifest de chaque session.
 
-**Calibration extrinsèque caméra ↔ antenne** : à faire **à chaque réinstallation du mount**.
-- Mesure manuelle au ruban : position (X,Y,Z) de la caméra dans le repère véhicule (origine = antenne iPhone).
-- Orientation approximative (typiquement pitch léger vers le bas, ~5°).
-- Encodé dans `session_dir/config.yaml`.
+**Pas de calibration extrinsèque mount** — sans objet pour l'évaluation d'état (pas besoin de positionnement précis 3D).
+
+**Mount-check pré-session** : l'app vérifie via IMU que la caméra est dans une plage de pitch/roll acceptable (caméra horizontale ±10°, vue dégagée) et alerte sinon.
+
+### 9.3 Bundle de session produit
+
+```json
+// manifest.json
+{
+  "session_id": "2026-04-27_14-30-00_a1b2c3d4",
+  "started_at": "2026-04-27T14:30:00-04:00",
+  "ended_at": "2026-04-27T15:12:33-04:00",
+  "device": {
+    "model": "iPhone16,1",
+    "ios_version": "18.4",
+    "app_version": "0.1.0"
+  },
+  "calibration_ref": "iphone_16pro_calibration_v1",
+  "conditions": {
+    "weather": "clear",      // saisi par utilisateur, optionnel
+    "road_wet": false,
+    "lighting": "daylight"
+  },
+  "video": {
+    "codec": "h265",
+    "resolution": "3840x2160",
+    "fps": 30,
+    "duration_sec": 2553
+  }
+}
+```
+
+```jsonl
+// gnss.jsonl (un fix par ligne)
+{"ts":"2026-04-27T14:30:00.123-04:00","lat":45.5012,"lon":-73.5673,"alt":42.1,"h_acc":3.2,"v_acc":5.1,"course":182.5}
+```
+
+```jsonl
+// imu.jsonl (un sample 100 Hz par ligne)
+{"ts":"2026-04-27T14:30:00.012-04:00","quat":[0.123,0.456,0.789,0.012],"gyro":[0.01,0.02,0.03],"accel":[0.1,0.2,9.8]}
+```
+
+```jsonl
+// heading.jsonl (un sample par ligne)
+{"ts":"2026-04-27T14:30:00.250-04:00","true_heading":182.3,"accuracy":5.0}
+```
 
 ---
 
-## 9. Pipeline de détection
+## 10. Pipeline de traitement Mac
 
-### 9.1 Modèle initial
+### 10.1 Ingestion
 
-- Démarrer avec un **YOLOv8/v11 pré-entraîné COCO** pour valider la pipeline.
-- Pour la signalisation, intégrer un modèle **fine-tuné Mapillary Traffic Sign Dataset** (disponible sur Roboflow / HF) — couvre la majorité de la signalisation nord-américaine.
-- **Classes de landmarks** (utilisées pour le recalage, voir §10.6) : à mapper sur les classes COCO disponibles selon les jeux open data — `fire hydrant`, `bench`, `traffic light`, `stop sign` (s'il existe un inventaire municipal), `tree` (via segmentation si disponible).
-- Mobilier urbain non-landmark : `bench`, `traffic light` non-inventoriés, etc.
+`wsmd ingest <session>` :
+- Valide la structure du bundle (présence de tous les fichiers attendus).
+- Extrait `frames.jsonl` à partir de la vidéo via ffmpeg (timestamp ISO 8601 par frame).
+- Crée le GeoPackage de session vide avec les tables communes.
+- Logge un résumé : durée, distance parcourue (interpolée GNSS), qualité moyenne `horizontalAccuracy`.
 
-### 9.2 Tracking
+### 10.2 Pré-annotation open-vocabulary
 
-- Tracker **ByteTrack** (intégré Ultralytics) avec `persist=True`, `conf=0.4`, `tracker='bytetrack.yaml'`.
-- Conservation : tous les hits d'un même `track_id`, pour exploitation en triangulation Phase 4.
-- Filtrage post-tracking : éliminer les tracks de < 3 frames consécutives (bruit).
+`wsmd preannotate <session> --prompts prompts/<module>.yaml` :
+- Charge un modèle Grounding DINO (`IDEA-Research/grounding-dino-tiny` via HuggingFace) ou YOLO-World (Ultralytics).
+- Sample des frames à 1-2 fps (les défauts ne changent pas vite).
+- Pour chaque classe définie dans le YAML, applique les prompts texte → bbox candidats.
+- Écrit le layer `candidates_<module>` dans le GeoPackage de session.
 
-### 9.3 Sortie
+Exemple de fichier prompts :
 
-CSV `detections.csv` :
-
+```yaml
+# prompts/pave_audit.yaml
+classes:
+  pothole:
+    prompts:
+      - "pothole on asphalt road"
+      - "circular hole in pavement filled with water"
+    confidence_threshold: 0.35
+  longitudinal_crack:
+    prompts:
+      - "long crack along asphalt direction"
+      - "linear crack parallel to road centerline"
+    confidence_threshold: 0.30
+  alligator_cracking:
+    prompts:
+      - "alligator cracking pattern on asphalt"
+      - "interconnected cracks forming polygons on pavement"
+    confidence_threshold: 0.30
+  patched_repair:
+    prompts:
+      - "rectangular asphalt patch repair"
+      - "darker rectangular patch on road surface"
+  frost_heave:
+    prompts:
+      - "frost heave deformation on asphalt"
+      - "vertical bump in road surface from frost"
+  salt_scaling:
+    prompts:
+      - "salt damage scaling on concrete pavement"
+      - "surface degradation from de-icing salt"
 ```
-frame_idx,track_id,class_name,x1,y1,x2,y2,confidence
-1542,17,stop_sign,1234.5,567.2,1389.1,725.8,0.92
+
+```yaml
+# prompts/chantier_watch.yaml
+classes:
+  traffic_cone:
+    prompts: ["orange traffic cone with reflective stripes"]
+  jersey_barrier:
+    prompts: ["concrete jersey barrier", "K-rail concrete barrier"]
+  construction_fence:
+    prompts: ["construction site fence", "chain-link construction perimeter fence", "wooden site hoarding"]
+  temporary_sign:
+    prompts: ["temporary construction warning sign", "orange diamond construction sign"]
+  construction_vehicle:
+    prompts: ["excavator on construction site", "asphalt paver", "construction truck", "hydraulic excavator"]
+  excavated_soil:
+    prompts: ["pile of excavated soil", "construction debris pile", "asphalt millings pile"]
 ```
+
+### 10.3 Annotation humaine (outil web local)
+
+`wsmd annotate <session>` ouvre une UI web locale (FastAPI + SvelteKit, port 5001 par défaut) qui lit/écrit le même GeoPackage de session.
+
+**Workflow par module** :
+
+- **PaveAudit** : galerie des candidats par classe → frame contextuelle → confirmer/rejeter/refiner bbox/changer classe/ajuster sévérité MTQ → ajouter défauts manqués manuellement
+- **ChantierWatch** : galerie des zones détectées → confirmer/rejeter/refiner bbox géographique → ajuster permit-match si la suggestion est incorrecte → flagger comme "vraiment sans permit" ou "permit existe ailleurs"
+
+**Ergonomie cible** : 20-30 sec par item médian (post-pré-annotation). Raccourcis clavier obligatoires :
+- `1` = confirmer
+- `2` = rejeter
+- `3` = corriger classe
+- `4` = corriger sévérité
+- Espace = item suivant
+- ← → = navigation
+- A = ajouter manuellement
+
+**Stockage** : layer GeoPackage `verified_<module>` avec `candidate_id`, `verdict` (`confirmed` / `rejected` / `corrected` / `added_manually`), `corrected_class`, `corrected_severity`, `annotator_id`, `annotated_at`. Le layer `annotations_log` conserve l'historique audit trail.
+
+### 10.4 Évaluation par module
+
+`wsmd evaluate <session> --modules pave_audit,chantier_watch` exécute chaque évaluateur en série :
+1. Charge le bundle + GeoPackage de session
+2. Charge le modèle custom fine-tuné (si dispo, sinon fallback sur pré-entraîné)
+3. Inference frame-par-frame ou par track
+4. Snap-to-road via OSRM (HTTP `/match` API)
+5. Logique métier propre (calcul IES MTQ, cross-check permits, etc.)
+6. Écrit ses layers de production dans le GeoPackage
+
+### 10.5 Export labels et fine-tuning
+
+`wsmd export-labels <session> --format yolo --output datasets/qc_pave_v1/` :
+- Lit le layer `verified_pave_audit` (gold labels uniquement, `verdict ∈ {confirmed, corrected, added_manually}`)
+- Exporte au format YOLO ou COCO
+- Maintient un index global `datasets/qc_pave_v1/index.yaml` : sessions incluses, frames count, classe distribution
+
+`wsmd train --module pave_audit --dataset datasets/qc_pave_v1/` :
+- Lance Ultralytics YOLO training (MPS PyTorch)
+- Mesure mAP sur split de validation
+- Sauvegarde `models/pave_audit_v<N>.pt` et met à jour `models/MANIFEST.yaml` :
+
+```yaml
+# models/MANIFEST.yaml
+pave_audit:
+  - version: v1
+    weights: pave_audit_v1.pt
+    git_commit: 7a3f2b1
+    dataset: qc_pave_v1
+    trained_at: 2026-06-15T12:00:00-04:00
+    metrics:
+      mAP_50: 0.62
+      mAP_50_95: 0.41
+    notes: "Bootstrap RDD2022 + 1500 frames Mtl annotées"
+  - version: v2
+    weights: pave_audit_v2.pt
+    git_commit: c9d8a7e
+    dataset: qc_pave_v2
+    trained_at: 2026-08-02T18:30:00-04:00
+    metrics:
+      mAP_50: 0.78
+      mAP_50_95: 0.54
+    notes: "Ajout 2500 frames Longueuil + frost_heave annotation dédiée"
+```
+
+### 10.6 Livraison
+
+`wsmd report <session> --format pdf` génère un rapport client (template Quarto + Jinja2) :
+- Page 1 : sommaire exécutif (km parcourus, défauts par classe, zones chantier détectées, % unmatched)
+- Page 2-3 : carte du réseau colorée par IES
+- Page 4 : top 20 segments les plus dégradés avec photo représentative
+- Page 5-6 : zones de chantier avec verdict permit + photos extraites
+- Annexe : tableau complet, métadonnées, version pipeline (modèle utilisé + commit Git)
+
+`wsmd serve` lance pygeoapi sur `http://localhost:5000` exposant les layers publics (segments, zones) ; les layers internes (candidates, frames_index) restent privés.
 
 ---
 
-## 10. Pipeline de géoréférencement (Niveau B)
+## 11. Module PaveAudit
 
-C'est le **cœur technique** du PoC. Décomposé en sous-étapes claires :
+### 11.1 Objectif
 
-### 10.1 Interpolation pose 6-DOF par frame
+Produire un classement IES (Indice d'État Subjectif) automatisé par segment de chaussée selon la **méthodologie d'évaluation visuelle MTQ**, avec localisation des défauts individuels.
 
-Pour chaque timestamp de frame :
-- **Position** : interpolation linéaire entre les 2 fixes GNSS encadrants.
-- **Orientation** : interpolation SLERP des quaternions IMU à 100 Hz.
-- Output : `poses.csv` avec `(frame_idx, lat, lon, alt, roll, pitch, yaw)` par frame.
+**Référence** : Guide d'utilisation des indices d'état des chaussées (MTQ) + catalogue des dégradations MTQ.
 
-### 10.2 Stratégie de fusion GNSS+IMU
+### 11.2 Classes de défauts
 
-**Pour Niveau B**, l'orientation déjà fusionnée par iOS via `CMDeviceMotion` en mode `xMagneticNorthZVertical` est suffisante. À évaluer empiriquement.
-
-Si la précision angulaire mesurée est insuffisante, basculer vers un **EKF léger** (position GNSS comme observation absolue, prédiction IMU à 100 Hz).
-
-### 10.3 Triangulation multi-vues par track
-
-Pour chaque `track_id` :
-1. Collecter toutes les frames où il est visible (typiquement 5–30 frames pour un objet à 30+ m de distance).
-2. Pour chaque frame : `(u, v)` centre de bbox + pose caméra 6-DOF.
-3. **Bundle adjustment** : minimiser la somme des résidus de reprojection pour trouver le point 3D dans le repère monde.
-4. `scipy.optimize.least_squares` est suffisant pour ce volume.
-5. Initialisation : milieu du segment de trajectoire à 30 m devant.
-
-```python
-# Esquisse de la fonction de coût
-def reproject_residuals(point_3d, observations, poses, K):
-    residuals = []
-    for (u, v), pose in zip(observations, poses):
-        p_cam = pose.world_to_camera @ np.append(point_3d, 1)
-        u_proj = K[0,0] * p_cam[0]/p_cam[2] + K[0,2]
-        v_proj = K[1,1] * p_cam[1]/p_cam[2] + K[1,2]
-        residuals.extend([u - u_proj, v - v_proj])
-    return residuals
-```
-
-### 10.4 Fallback pour tracks courts
-
-Pour les tracks < 3 frames (objet vu fugacement) :
-- Estimation **mono-vue par hauteur connue** : `distance_m ≈ f * H_real / H_pixels`.
-- Hauteurs de référence par classe (panneau STOP : 750 mm, lampadaire : ~9 m, etc.).
-- Précision dégradée 10–25 % — acceptable comme fallback, à flagger dans la sortie (`precision_class = 'mono_estimate'`).
-
-### 10.5 Reprojection cartographique
-
-```python
-# ENU local → WGS84 → NAD83 MTM zone 8
-import pymap3d as pm
-import pyproj
-
-lat, lon, alt = pm.enu2geodetic(e, n, u, lat0, lon0, alt0)
-transformer = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:32188", always_xy=True)
-x_mtm, y_mtm = transformer.transform(lon, lat)
-```
-
-EPSG:32188 = NAD83 / MTM zone 8 — projection de référence pour Montréal/Longueuil.
-
-### 10.6 Recalage sur landmarks géoréférencés
-
-Optionnel mais utile pour éliminer l'erreur systématique GNSS (multipath, bias) sans coût matériel additionnel.
-
-**Principe** : tout actif fixe dont la position est déjà connue dans un jeu de données ouvert municipal peut servir de landmark. Lorsque le pipeline détecte un tel objet par YOLO et qu'il existe un candidat connu à proximité du GPS prior, on dispose d'une mesure `(observation_GPS, vérité_landmark)` exploitable comme correction.
-
-**Sources de landmarks** (dépend de la municipalité de la zone test) :
-
-| Type | Source typique | Densité | Notes |
+| Classe | MTQ | Spécificité QC | Source bootstrap |
 |---|---|---|---|
-| Bornes-fontaines | Données Québec, Ville de Montréal | Élevée | Bonne couverture, position fiable |
-| Lampadaires | Hydro-Québec, Données Québec | Très élevée | Très fréquents, recalage dense |
-| Arbres inventoriés | Ville de Montréal (arbres publics) | Élevée en zones urbaines | Détection CV par segmentation possible |
-| Abribus / mobilier RTL/STM/STL | Catalogues transit ouverts | Modérée | Position fiable, spécifique |
-| Panneaux STOP inventoriés | Catalogues municipaux SIG (variable) | Variable | Inégal ; à vérifier au cas par cas |
+| Nid-de-poule | Pothole | Très fréquent post-gel | RDD2022 + Pothole-600 |
+| Fissure longitudinale | Long. crack | Fréquent QC | RDD2022 |
+| Fissure transversale | Trans. crack | Hivernal récurrent | RDD2022 |
+| Faïençage | Alligator crack | Sévère après cycles gel-dégel | RDD2022 + Crack500 |
+| Ressuage | Bleeding | Estival | RDD2022 |
+| Réparation rapace (patch) | Patching | Très fréquent QC | Bootstrap manuel |
+| Soulèvement par gel | Frost heave | **Spécifique QC** — pas dans datasets ouverts | À annoter from scratch |
+| Dégradation au sel | Salt scaling | **Spécifique QC** — subtil | À annoter from scratch |
 
-**Stockage local** :
-- Avant chaque session, télécharger les jeux pertinents depuis les portails open data au format GeoJSON ou GeoPackage.
-- Persister sur le MacBook dans `data/landmarks/<municipality>/` (par ex. `data/landmarks/longueuil/lampadaires.gpkg`).
-- Charger en mémoire dans une **table commune** `landmarks` au sein du `assets.gpkg` du pipeline, avec un attribut `landmark_class` (= `fire_hydrant`, `lamppost`, `tree`, ...) et un identifiant municipal d'origine.
+### 11.3 Pipeline interne
 
-**Accès — R-tree** :
-- Utiliser un index R-tree (intégré à GeoPackage / SQLite) pour requêter rapidement les candidats dans un rayon de ~10 m autour du GPS prior d'une frame.
-- Coût d'une requête : sub-milliseconde, négligeable même sur des milliers de frames.
+1. Extraction de frames à 1-2 fps de la vidéo.
+2. Inférence YOLO custom fine-tuné → bbox de défauts par frame.
+3. **Snap-to-road** : chaque détection associée au segment routier le plus proche via OSRM `/nearest` ou `/match`.
+4. **Agrégation par segment routier** (typiquement 50-100 m via Géobase) :
+   - Comptage des défauts par classe et sévérité (légère / modérée / sévère selon barèmes MTQ)
+   - Calcul de **densité de défauts** (nb / m²) par classe
+   - Conversion en valeur de déduction MTQ par classe selon les barèmes
+   - **Score IES 0-100** par segment
+5. Output GeoPackage layers :
+   - `pavement_defects` : chaque détection avec `frame_idx`, `bbox`, `class`, `severity`, `confidence`
+   - `pavement_segments` : segments routiers avec `ies_score`, `classification`, `n_defects_by_class`
+   - `pavement_metadata` : version modèle, version prompts, conditions de captation
 
-**Algorithme de recalage** :
-1. Pour chaque détection CV de classe correspondante (ex. `fire_hydrant`), interroger le R-tree des landmarks de cette classe dans un rayon adapté autour du GPS prior.
-2. Si un seul candidat retourné → match (et calcul du delta `gps - landmark`).
-3. Si plusieurs candidats → désambiguïsation par projection bbox-camera ou rejet (Algo A pilot : on garde le plus proche, Algo B futur : on triangule).
-4. Calculer un **delta médian** sur l'ensemble des matches de la session (lat, lon).
-5. Appliquer le delta à toutes les détections (et optionnellement aux poses caméra) de la session.
+### 11.4 Validation
 
-**Robustesse** : la médiane absorbe les mauvais matches (outliers). Pour Niveau B, c'est suffisant. Niveau C bénéficierait d'un Kalman temporel.
+- 5-10 segments de référence captés à Montréal, indexés manuellement par 1 ingénieur civil de référence (à recruter en Phase 1, idéalement via réseau personnel ou recommandation académique).
+- Métriques :
+  - Accord κ Cohen sur classification IES (cible : ≥ 0.6)
+  - mAP par classe de défaut (cible : ≥ 0.75)
+  - Erreur IES moyenne par segment (cible : ±10/100)
+- Re-mesure après chaque itération de fine-tune.
 
-### 10.7 Déduplication
+### 11.5 Livrable client
 
-- Même classe + distance < 2 m → même objet (probable double détection sur passages différents).
-- Fusion : moyenne pondérée par confiance × nombre d'observations.
+- Rapport PDF par mandat : carte du réseau colorée par IES, top 20 segments les plus dégradés (avec photos), liste des défauts en annexe, tableau récapitulatif.
+- GeoPackage exportable QGIS / ArcGIS / GDAL.
+- Endpoint OGC API Features `pavement_segments` consommable directement.
 
 ---
 
-## 11. Modèle de données et livraison OGC
+## 12. Module ChantierWatch
 
-### 11.1 Schéma `detected_assets`
+### 12.1 Objectif
+
+Détecter les zones de chantier sur la voirie, les cross-référencer avec les bases de permits OdP municipales open data, et flagger les chantiers sans permit correspondant comme **signaux d'audit** (non comme preuves légales).
+
+### 12.2 Classes de détection
+
+| Classe | COCO ? | Pré-annotation prompts |
+|---|---|---|
+| Cône de signalisation orange | ❌ | "orange traffic cone with reflective stripes" |
+| Barrière Jersey béton | ❌ | "concrete jersey barrier", "K-rail concrete barrier" |
+| Barrière de chantier métal/plastique | ❌ | "construction barrier fence", "orange barricade" |
+| Panneau temporaire chantier | ❌ | "temporary construction warning sign", "diamond construction sign" |
+| Véhicule de chantier (pelles, etc.) | partiel | "excavator", "asphalt paver", "construction truck", "hydraulic excavator", "mini-excavator" |
+| Marquage temporaire orange | ❌ | "orange temporary lane marking" |
+| Clôture de chantier privée | ❌ | "construction site fence", "chain-link construction perimeter fence", "wooden site hoarding" |
+| Déblais | ❌ | "pile of excavated soil", "construction debris pile", "asphalt millings pile" |
+
+### 12.3 Pipeline interne
+
+1. Détection frame-par-frame YOLO custom fine-tuné (ou YOLO-World direct si fine-tune pas prêt).
+2. **Clustering spatial** : DBSCAN sur coordonnées géographiques + temporelles → "zones de chantier" (polygones englobants).
+3. Génération bbox géographique de chaque zone (POLYGON GeoPackage).
+4. **Cross-check permits** :
+   - Charger cache local des permits OdP de la ville de captation (téléchargé pré-session).
+   - Pour chaque zone : requête R-tree → permits intersectant la géométrie.
+   - Filtrer par fenêtre temporelle : `permit.date_debut ≤ session_date ≤ permit.date_fin`.
+   - **Verdict** :
+     - `permitted` : ≥ 1 permit actif intersectant
+     - `unmatched` : aucun permit intersectant trouvé
+     - `permit_expired` : permit existe mais hors fenêtre temporelle
+     - `data_unavailable` : ville sans données ouvertes de permits → flag manuel
+5. Output GeoPackage layers :
+   - `construction_detections` : détections individuelles
+   - `construction_zones` : zones agrégées avec `verdict`, `permit_ids` (si match)
+   - `permits_reference` : copie du cache permits utilisé (traçabilité)
+   - `unmatched_zones` : sous-ensemble flaggé pour audit (vue filtrée)
+
+### 12.4 Adaptateurs permits par ville
+
+```python
+class PermitAdapter(Protocol):
+    city: str
+    
+    def fetch_permits(self, bbox: BBox, date: datetime) -> list[Permit]: ...
+    def normalize(self, raw: dict) -> Permit: ...
+```
+
+**Implémentations v1** :
+- `MontrealPermitAdapter` — Données ouvertes Montréal, dataset "Entraves planifiées" et permits OdP
+- `SherbrookePermitAdapter` — à valider en Phase 2 (Phase 8 du plan), selon disponibilité des données ouvertes
+- `LongueuilPermitAdapter` — à valider, peut tomber en `GenericNoneAdapter` selon disponibilité
+- `GenericNoneAdapter` — fallback : toutes zones flaggées en `data_unavailable`, livrable identifie clairement la limitation
+
+### 12.5 Validation
+
+- 20-30 zones de chantier de référence captées à Montréal (ville avec permits open data les plus complets).
+- Métriques :
+  - Recall détection chantier (cible : ≥ 85 %) — proportion de chantiers réels détectés
+  - Précision verdict `unmatched` (cible : ≥ 90 %) — quand le système dit "unmatched", il a effectivement raison
+  - F1 sur cross-check temporel (cible : ≥ 0.85)
+- Cas `unmatched` validés manuellement par croisement avec d'autres sources (Mtl-info, signalements citoyens 311) avant de conclure violation.
+
+### 12.6 Livrable client
+
+- Rapport PDF par mandat : carte des zones détectées, tableau des `unmatched` avec photos extraites + permit IDs vérifiés/absents.
+- GeoPackage avec couche "potentielles violations à vérifier".
+- **Avertissement explicite** dans le rapport : *"Ce rapport produit un signal d'audit, pas une preuve légale. Toute action d'enforcement doit être précédée d'une vérification terrain par un inspecteur autorisé."*
+
+---
+
+## 13. Module Annotation et boucle active learning
+
+### 13.1 Pourquoi un module à part entière
+
+Aucun évaluateur ne sera jamais à 100 % en sortie. Pour qu'une firme ou une ville accepte le livrable, un humain doit pouvoir relire, corriger, et **certifier**. Chaque correction = un nouvel exemple d'entraînement pour le fine-tune incrémental.
+
+L'outil d'annotation est aussi le **différenciateur de vente** : "tu reçois un rapport pré-classé à 80 %, ton ingénieur civil le corrige en 2 h plutôt que d'inspecter en 5 jours."
+
+### 13.2 Architecture
+
+- App web locale (FastAPI backend + SvelteKit frontend) servie par `wsmd annotate` sur `localhost:5001`
+- Lit/écrit le **même GeoPackage** de session que les évaluateurs — pas de duplication de données
+- Auth absente en v1 (localhost), basic auth ajoutable en v2 quand un partenaire l'utilise
+- Module-aware : UI adaptée à chaque évaluateur (PaveAudit vs ChantierWatch ont des champs différents à corriger)
+
+### 13.3 Boucle d'amélioration
+
+```
+Capture session
+    ↓
+wsmd preannotate (Grounding DINO ou YOLO-World)
+    ↓
+GeoPackage : layer "candidates"
+    ↓
+wsmd annotate    ← humain vérifie (15-30 sec/box)
+    ↓
+GeoPackage : layer "verified" (gold labels)
+    ↓
+wsmd export-labels    → dataset YOLO/COCO
+    ↓
+wsmd train --module X    → custom YOLO rapide (production)
+    ↓
+Évaluateurs en production utilisent le custom YOLO entraîné
+    ↓
+[boucle continue : nouvelles sessions → nouvelles annotations → ré-entraînement périodique]
+```
+
+### 13.4 Honnêteté sur les limites
+
+Grounding DINO et YOLO-World ne sont **pas parfaits**. Ils vont :
+- Manquer des défauts subtils (salt damage typique du QC peut être imperceptible).
+- Sortir des faux positifs sur textures ambiguës (ombres = fissures, etc.).
+- Être inconsistants frame-à-frame.
+
+C'est exactement pourquoi l'humain est dans la boucle. La pré-annotation accélère mais ne remplace pas la révision.
+
+---
+
+## 14. Données disponibles et stratégie de training
+
+### 14.1 État des lieux des datasets
+
+| Domaine | Source | Volume | Licence | QC-spécifique ? | Utilité v1 |
+|---|---|---|---|---|---|
+| Défauts chaussée | RDD2022 (IEEE Big Data Cup) | 47 k images, 8 classes | Académique (à vérifier commercial) | ❌ (US, JP, IN, CZ, NO) | Bootstrap principal |
+| Défauts chaussée | Crack500, CrackForest, GAP, Pothole-600 | qq centaines à milliers | CC variées | ❌ | Compléments |
+| Défauts chaussée | Roboflow Universe community | variable | variable | quelques rares | À trier au cas par cas |
+| Cônes / barrières | COCO (traffic objects) + OpenImages V7 | grand | CC-BY | ❌ | Bootstrap chantier |
+| Cônes / barrières | Roboflow `construction-equipment` | variable | variable | ❌ | Compléments |
+| **Permits OdP Montréal** | Données Québec / Mtl ouvert | actualisé en continu | CC-BY | ✅ | Cross-check direct |
+| Permits OdP autres villes | Données Québec (variable selon municipalité) | variable | CC-BY | ✅ partiel | Selon ville |
+| Référentiel routier | Géobase Québec + OpenStreetMap | provincial complet | CC-BY / ODbL | ✅ | Snap-to-road |
+
+### 14.2 Stratégie phasée
+
+```
+Phase 0 (semaines 1-3) : Bootstrap pré-entraîné
+  ├─ YOLOv8 pré-entraîné COCO (chantiers : cônes, barrières)
+  ├─ YOLOv8 pré-entraîné RDD2022 (chaussée : 8 classes)
+  ├─ Mesurer baseline sur 200-300 frames captées au QC
+  └─ Cible : ~60 % mAP — c'est bas, c'est attendu
+
+Phase 1 (semaines 4-12) : Bootstrap dataset QC
+  ├─ Captation 5-10 sessions Montréal/Longueuil (10-20 km chacune)
+  ├─ Pré-annotation Grounding DINO/YOLO-World
+  ├─ Révision humaine de 5000-10 000 frames (1-2 weekends post-pré-annotation)
+  ├─ Fine-tune YOLOv8 custom sur dataset combiné (RDD2022 + QC)
+  └─ Cible : ~75 % mAP PaveAudit, 85 % recall ChantierWatch
+
+Phase 2 (continue) : Boucle active learning
+  ├─ Chaque nouvelle session captée + annotée → ajout au dataset
+  ├─ Ré-entraînement périodique (tous les 3-5k frames ajoutés)
+  ├─ Mesure régression vs version précédente
+  └─ Versioning des poids dans models/MANIFEST.yaml
+```
+
+### 14.3 Considérations licences
+
+- **RDD2022** : licence académique, à vérifier précisément en Phase 0 avant utilisation commerciale. Si bloquant : training from scratch sur dataset 100 % maison Phase 2.
+- **COCO, OpenImages** : CC-BY, utilisables commercialement avec attribution.
+- **Permits OdP Montréal, Géobase, Données Québec** : CC-BY, utilisables sans restriction commerciale avec attribution.
+- **Dataset QC propre** : conserver privé en v1 ; décision sur publication HF Hub (CC-BY-NC) à revoir Phase 2.
+
+---
+
+## 15. Modèle de données et livraison OGC
+
+### 15.1 Schéma GeoPackage `assets.gpkg`
+
+```
+Tables communes:
+  sessions              # toutes sessions captées (id, dates, device, conditions)
+  frames_index          # frames par session (frame_idx, ts_iso, has_detection)
+
+Tables PaveAudit:
+  pavement_defects      # détections individuelles (POINT, attributs ci-dessous)
+  pavement_segments     # segments routiers avec IES (LINESTRING)
+  pavement_metadata     # version modèle, prompts, conditions
+
+Tables ChantierWatch:
+  construction_detections   # détections individuelles (POINT)
+  construction_zones        # zones agrégées avec verdict (POLYGON)
+  permits_reference         # cache permits utilisé (POLYGON, traçabilité)
+  unmatched_zones           # vue filtrée des unmatched
+
+Tables Annotation:
+  candidates_<module>       # sortie pré-annotation par module
+  verified_<module>         # gold labels post-révision humaine
+  annotations_log           # historique audit trail
+```
+
+### 15.2 Schéma `pavement_segments`
 
 ```sql
-CREATE TABLE detected_assets (
-  asset_id          INTEGER PRIMARY KEY,
-  class             TEXT NOT NULL,            -- ex. 'stop_sign', 'lamppost'
-  geom              POINT NOT NULL,            -- WGS84 (EPSG:4326)
-  geom_mtm          POINT,                     -- NAD83 MTM zone 8 pour SIG locaux
-  confidence        REAL NOT NULL,             -- score moyen sur le track
-  precision_m       REAL,                      -- estimation incertitude (m)
-  precision_class   TEXT,                      -- 'triangulated' | 'mono_estimate' | 'recalibrated'
-  session_id        TEXT NOT NULL,             -- UUID de la session
-  detected_at       TIMESTAMP NOT NULL,        -- moment de la détection
-  n_observations    INTEGER,                   -- nombre de frames où l'objet a été vu
-  representative_frame_idx  INTEGER,           -- index de la frame "vitrine"
-  representative_bbox_json  TEXT,              -- bbox sur cette frame (pour image preview)
-  attributes_json   TEXT                       -- extensions futures
+CREATE TABLE pavement_segments (
+  segment_id        INTEGER PRIMARY KEY,
+  geom              LINESTRING NOT NULL,           -- WGS84 (EPSG:4326)
+  geom_mtm          LINESTRING,                     -- NAD83 MTM zone 8 pour SIG QC
+  street_name       TEXT,
+  start_chainage_m  REAL,
+  length_m          REAL NOT NULL,
+  ies_score         REAL,                           -- 0-100, méthodologie MTQ
+  ies_classification TEXT,                          -- ex. 'Bon', 'Acceptable', 'Mauvais', 'Très mauvais'
+  n_defects_total   INTEGER,
+  n_defects_by_class JSON,                          -- {"pothole": 3, "long_crack": 7, ...}
+  session_id        TEXT NOT NULL,
+  evaluated_at      TIMESTAMP NOT NULL,
+  model_version     TEXT NOT NULL                   -- ex. "pave_audit_v2"
 );
 ```
 
-Indices : sur `(class)`, `(session_id)`, R-tree spatial.
+### 15.3 Schéma `construction_zones`
 
-### 11.2 Configuration pygeoapi
+```sql
+CREATE TABLE construction_zones (
+  zone_id           INTEGER PRIMARY KEY,
+  geom              POLYGON NOT NULL,               -- WGS84
+  centroid          POINT,
+  detections_count  INTEGER NOT NULL,
+  classes_present   JSON,                           -- ["traffic_cone", "jersey_barrier", ...]
+  verdict           TEXT NOT NULL,                  -- 'permitted' | 'unmatched' | 'permit_expired' | 'data_unavailable'
+  matched_permit_ids JSON,                          -- ['PERMIT-2026-12345', ...] si verdict=permitted
+  session_id        TEXT NOT NULL,
+  detected_at       TIMESTAMP NOT NULL,
+  model_version     TEXT NOT NULL
+);
+```
+
+### 15.4 Configuration pygeoapi
 
 ```yaml
+# pygeoapi-config.yaml
 server:
   bind: { host: 0.0.0.0, port: 5000 }
   url: http://localhost:5000
 
 resources:
-  detected_assets:
+  pavement_segments:
     type: collection
-    title: Détections d'actifs municipaux (wsmd PoC)
-    description: Inventaire automatisé par vision artificielle géoréférencée
-    keywords: [signalisation, mobilier, municipal, longueuil]
+    title: Segments de chaussée évalués (PaveAudit)
+    description: État de chaussée selon méthodo MTQ
+    keywords: [chaussée, IES, MTQ, audit]
     crs: [http://www.opengis.net/def/crs/EPSG/0/4326]
     providers:
       - type: feature
         name: GeoPackage
         data: /path/to/assets.gpkg
-        id_field: asset_id
-        table: detected_assets
+        id_field: segment_id
+        table: pavement_segments
+  
+  construction_zones:
+    type: collection
+    title: Zones de chantier détectées (ChantierWatch)
+    description: Détection automatisée + cross-check permits OdP
+    providers:
+      - type: feature
+        name: GeoPackage
+        data: /path/to/assets.gpkg
+        id_field: zone_id
+        table: construction_zones
 ```
 
-### 11.3 Endpoints exposés
+### 15.5 Endpoints exposés
 
-- `GET /collections/detected_assets/items` — GeoJSON FeatureCollection
-- `GET /collections/detected_assets/items?bbox=...&class=stop_sign` — filtrage
-- `GET /collections/detected_assets/items/{asset_id}` — feature individuelle
-- `GET /collections/detected_assets/items?f=html` — UI HTML simple intégrée à pygeoapi
+- `GET /collections/pavement_segments/items?bbox=...&ies_score__lt=50` — filtrage par BBox + score
+- `GET /collections/pavement_segments/items/{segment_id}` — segment individuel
+- `GET /collections/construction_zones/items?verdict=unmatched` — zones flaggées
+- `GET /collections/construction_zones/items?f=html` — UI HTML simple intégrée
 
-### 11.4 Consommation cible
+### 15.6 Consommation cible
 
-- **QGIS** : ajout d'une couche WFS / OGC API Features → `http://localhost:5000/collections/detected_assets/items`. Consommation native.
-- **Curl / scripts** : `curl http://localhost:5000/collections/detected_assets/items?bbox=-73.6,45.5,-73.5,45.6 > export.geojson`.
-- **Browser** : interface HTML générée automatiquement par pygeoapi.
-
----
-
-## 12. Validation de précision
-
-### 12.1 Protocole
-
-1. Sélectionner une **zone test** de 2–5 km de rues à Longueuil (boucle représentative).
-2. **Identifier 15–20 panneaux de référence** clairement visibles dans la zone.
-3. **Mesurer leur position vérité** par l'une des méthodes suivantes :
-   - **Préférée** : location d'un récepteur RTK (Cansel, ~200 $/jour) — précision cm.
-   - **Alternative** : relevé manuel sur cartographie ouverte haute résolution (vérifier la précision de la source).
-   - **Dégradée** : Google Earth Pro très haute résolution avec mesure manuelle (précision ~50 cm).
-4. **Capturer le trajet 3 fois** dans la même journée à des moments différents (matin / midi / fin de journée → conditions d'éclairage variées).
-5. **Exécuter la pipeline** sur chacune des 3 captures.
-6. **Pour chaque panneau de référence**, calculer :
-   - Erreur en mètres (distance euclidienne entre détection et vérité).
-   - Identification du panneau dans la sortie (auto si possible, manuel sinon).
-7. **Produire un rapport** `validation_report.md` :
-   - Histogramme des erreurs.
-   - Erreur médiane, moyenne, 95e centile.
-   - Comparaison entre passages (répétabilité).
-   - Cas problématiques identifiés (occlusions, distance, conditions).
-   - Recommandation : Niveau B atteint ? Si non, où sont les pertes ?
-
-### 12.2 Critères de succès
-
-| Métrique | Cible Niveau B |
-|---|---|
-| Erreur médiane | < 1.5 m |
-| CEP95 | < 2.5 m |
-| Taux de détection | > 85 % des panneaux visibles |
-| Répétabilité inter-passage | < 1 m |
-
-### 12.3 Causes d'erreur attendues et investigation
-
-Si Niveau B n'est pas atteint, attribuer l'erreur à l'un des contributeurs :
-
-| Source | Diagnostic |
-|---|---|
-| GNSS bruité | Mesurer `horizontalAccuracy` moyenne par session |
-| Heading imprécis | Comparer heading IMU à course GNSS sur ligne droite |
-| Calibration intrinsèque | Vérifier RMS reprojection initial < 0.5 px |
-| Calibration extrinsèque | Vérifier mesures de mount au ruban (incertitude ±5 cm) |
-| Triangulation N-vues | Inspecter résidus de reprojection par track |
-| Nombre d'observations par track | Histogramme — un track de 3 frames est moins fiable que 20 |
-| Synchro horaire | Mesurer drift via flash de calibration |
+- **QGIS** : ajout de couche WFS / OGC API Features → consommation native
+- **Curl / scripts** : `curl http://localhost:5000/collections/pavement_segments/items?bbox=... > export.geojson`
+- **Browser** : interface HTML générée automatiquement par pygeoapi
 
 ---
 
-## 13. Plan phasé (8 semaines)
+## 16. Validation par module
 
-| Phase | Semaine | Livrable | Effort (jp) |
+### 16.1 Protocole PaveAudit
+
+1. Sélectionner **5-10 segments de référence** dans la zone test Montréal (3-5 km de boucle), variés en état de chaussée.
+2. **Inspection manuelle** par 1 ingénieur civil de référence (à recruter Phase 1, via réseau personnel ou recommandation académique).
+3. Captation wsmd des mêmes segments en 3 passages (matin/midi/fin de journée pour variabilité d'éclairage).
+4. Exécution du pipeline → IES par segment + liste des défauts.
+5. Comparaison segment-à-segment :
+   - Accord sur classification IES (κ Cohen)
+   - Précision/recall par classe de défaut (mAP)
+   - Erreur IES moyenne (RMSE)
+6. Production de `validation_report.md` :
+   - Tableau de confusion classification IES
+   - Histogramme erreurs IES
+   - Cas problématiques identifiés (occlusions, distance, conditions)
+
+### 16.2 Protocole ChantierWatch
+
+1. Identifier **20-30 zones de chantier** captées à Montréal sur boucle de 10-20 km.
+2. **Vérification manuelle** : pour chaque zone, croiser avec la base de permits OdP (téléchargée à la même date que la captation). Construire la vérité terrain `permitted` / `unmatched` / `permit_expired`.
+3. Exécution du pipeline ChantierWatch → verdicts automatisés.
+4. Comparaison zone-à-zone :
+   - Recall détection (combien de chantiers réels ont été détectés ?)
+   - Précision verdict `unmatched` (combien des "unmatched" sont vraiment des chantiers sans permit ?)
+   - F1 cross-check temporel
+5. **Validation manuelle des `unmatched`** par croisement Mtl-info / 311 (signalements citoyens) pour confirmer absence effective de permit.
+
+### 16.3 Validation portage Sherbrooke
+
+- Réplique du protocole sur 1-2 boucles à Sherbrooke en Phase 8.
+- Mesure de la dégradation de performance (modèle entraîné sur Mtl appliqué à Sherbrooke).
+- Si dégradation > 15 % en mAP : ajout de 500-1000 frames Sherbrooke au dataset, ré-entraînement.
+
+---
+
+## 17. Plan phasé
+
+| Phase | Durée | Livrable | Effort estimé |
 |---|---|---|---|
-| 0 — Setup environnement | 1 | venv Python opérationnel, YOLO MPS validé, calibration Brio | 1–2 |
-| 1 — App iOS de logging | 2 | App SwiftUI déployée, GNSS+IMU loggés en CSV + WebSocket | 3–5 |
-| 2 — Pipeline capture Mac | 3 | `wsmd capture` produit un session_dir complet | 3–4 |
-| 3 — Détection + tracking | 4 | YOLO + ByteTrack sur vidéo, `detections.csv` produit | 2–3 |
-| 4 — Géoréférencement | 5–6 | Triangulation N-vues, reprojection MTM, recalage landmarks | 5–8 |
-| 5 — Livraison OGC | 7 | pygeoapi servant `detected_assets`, consommé par QGIS | 1–2 |
-| 6 — Validation | 8 | Rapport de précision sur zone test | 2–3 |
-| **Total** |  |  | **17–27 jours-personne** |
+| **0 — Setup environnement** | 2 sem | venv Python, MPS PyTorch validé, calibration intrinsèque iPhone, repo Git initialisé, vérif licence RDD2022 | 8-12 h |
+| **1 — App iOS captation** | 3 sem | App SwiftUI déployée free-provisioning, bundle session produit, mount-check, calibration | 25-35 h |
+| **2 — Pipeline ingestion** | 1 sem | `wsmd ingest`, frames extraction, JSON schemas validés | 8-12 h |
+| **3 — Pré-annotation + outil annotation web** | 3-4 sem | `wsmd preannotate` avec Grounding DINO, outil web FastAPI+SvelteKit fonctionnel | 30-45 h |
+| **4 — Bootstrap dataset + fine-tune PaveAudit** | 4 sem | Annotation 3-5k frames Mtl, fine-tune YOLO PaveAudit, mAP baseline mesurée | 35-50 h (annotation = 20-25 h) |
+| **5 — Bootstrap ChantierWatch + adapter Mtl** | 3 sem | Fine-tune YOLO ChantierWatch, MontrealPermitAdapter, cross-check fonctionnel | 25-35 h |
+| **6 — Livraison OGC + rapports** | 2 sem | `wsmd serve` avec pygeoapi, template rapport PDF Quarto | 12-18 h |
+| **7 — Validation Montréal** | 2 sem | Captation + validation 5-10 segments + 20 zones, rapport de précision, recrutement ingénieur civil | 15-25 h |
+| **8 — Portage Sherbrooke** | 2 sem | SherbrookePermitAdapter (ou GenericNoneAdapter), captation + validation portabilité | 12-18 h |
+| **Total** | **~22 semaines** |  | **~170-250 h** |
 
-À temps partiel (soirs/weekends) : ≈ 6–8 semaines calendaires pour 1 personne, ≈ 3–4 semaines pour 2 personnes en parallèle.
+À 8 h/semaine effectifs (soirs + 1 weekend par mois) : **5-6 mois calendaires**.
+À 12 h/semaine (intense) : **4-5 mois calendaires**.
+
+**Plan B si retard en Phase 5** : démo PaveAudit seul en Phase 7, ChantierWatch livré en bonus visuel sans cross-check, finalisation cross-check Phase 8.
 
 ---
 
-## 14. Risques et points de vigilance
+## 18. Risques et mitigations
 
-### 14.1 Risques techniques
+### 18.1 Risques techniques
 
 | Risque | Probabilité | Impact | Mitigation |
 |---|---|---|---|
-| GNSS iPhone insuffisant en zone urbaine dense (multipath) | Moyenne | Niveau B raté | Recalage landmarks + plan B = ZED-F9P RTK |
-| Heading imprécis → triangulation diverge | Moyenne | Niveau B raté | EKF léger ; ou passage dual-antenna en Phase 2 |
-| Désynchro temporelle > 100 ms en certains samples | Faible | Erreur ~30–60 cm @ 50 km/h | Logger drift NTP, compenser logiciellement |
-| Modèle pré-entraîné insuffisant sur signalisation QC | Moyenne | Taux détection < 85 % | Fine-tuning Mapillary subset QC, fallback manuel |
-| Volumes de données ingérables sur SSD 2 TB | Faible | Sessions limitées | Compression H.265, downsampling 1080p si Brio supporte |
-| Vie privée (plaques, visages) fuite hors PoC | Moyenne | Risque légal | Stockage local sécurisé, pas de diffusion ; floutage avant tout partage |
+| Grounding DINO + fine-tune ratent les défauts hivernaux subtils (frost heave, salt scaling) | Moyenne-haute | Cible IES non atteinte | Annotation manuelle dédiée à ces classes ; flag explicite dans rapport ; "v2 avec capteur inertiel pour IRI" en upsell |
+| Permits Sherbrooke peu/pas en open data | Élevée | ChantierWatch dégradé sur Sherbrooke | `GenericNoneAdapter` qui flag toutes zones `data_unavailable` ; pitch "ça force la ville à publier ses permits" comme argument civic-tech |
+| Side project, fenêtre 4-6 mois optimiste | Moyenne | Démo retardée | Découpage livraisons : démo PaveAudit seul à 4 mois si ChantierWatch retarde ; plan B documenté |
+| Validation κ ≥ 0.6 non atteinte malgré fine-tune | Moyenne | Pas de pitch firme convaincant | Calibrer scoring vs MTQ sur données réelles avant de promettre ; ajuster les seuils MTQ ; reformuler pitch en "outil de pré-priorisation" |
+| Volumes de vidéos ingérables | Faible | Sessions limitées | H.265 4K = ~6 GB/h ; SSD externe 1-2 TB suffit pour la durée du PoC |
+| iPhone 16 Pro indisponible / ancienne génération moins précise | Faible | Précision GNSS dégradée | Tester sur iPhone 15 Pro en backup ; mesurer empiriquement |
 
-### 14.2 Risques projet
+### 18.2 Risques commerciaux et juridiques
 
-- **Sous-estimation du temps de calibration** : à minimiser, c'est facile à reporter et à rallonger. Bloquer la Phase 0 si calibration RMS > 0.5 px.
-- **Dérive de scope** : ne pas ajouter détection d'état, UI validateur, dataset publication tant que Niveau B n'est pas démontré.
-- **Disponibilité iPhone 16 Pro** : matériel personnel, à confirmer.
-- **Météo défavorable au planning** : prévoir buffer pour repasser en cas de pluie/neige rendant les captures inexploitables.
+| Risque | Probabilité | Impact | Mitigation |
+|---|---|---|---|
+| Conflit d'intérêts mal géré | Faible mais critique | Sanction professionnelle | Divulgation à l'autorité d'éthique avant tout pitch ; entité juridique distincte avant facturation ; aucune captation/usage matériel employeur (cf. §3) |
+| Dataset QC non commercialement utilisable (licences source) | Faible | Modèle final non vendable | Vérifier licences en Phase 0 ; toute donnée incertaine → exclue du dataset commercial ; possibilité re-train from scratch sur dataset 100 % maison Phase 2 |
+| Loi 25 — vidéos avec plaques/visages | Moyenne | Risque légal vente | Stockage local SSD chiffré v1 ; floutage automatique avant tout partage externe (Phase 2, modèle ANPR + MTCNN) ; ne pas démontrer à un client avec vidéos brutes |
+| Disclaimer "signal d'audit" insuffisant en cas de litige | Faible | Risque légal | Avis juridique avant premier contrat commercial ; clauses contractuelles claires de limitation de responsabilité |
 
-### 14.3 Conformité & vie privée (loi 25 Québec)
+### 18.3 Risques projet
 
-- Les vidéos brutes contiennent **plaques d'immatriculation** et **visages** = données personnelles.
-- **Pour le PoC** : stockage local sur SSD chiffré, pas de partage externe, pas de upload cloud.
-- **Si le projet va plus loin** : floutage automatique obligatoire avant tout partage (modèles CV existants : ANPR pour plaques, MTCNN ou similaire pour visages).
-- Documenter dans `metadata.json` la nature des données et la rétention.
+- **Sous-estimation du temps d'annotation** : à minimiser, c'est facile à allonger. Bloquer la Phase 4 si volume annoté < 1500 frames à mi-phase et reconsidérer l'embauche d'un stagiaire Mitacs pour bootstrap dataset.
+- **Dérive de scope** : ne pas implémenter SignageStateEvaluator ni MarkingEvaluator ni floutage auto avant que PaveAudit + ChantierWatch ne soient livrés et validés.
+- **Météo défavorable au planning de captation** : prévoir buffer (Phase 7-8) pour repasser en cas de pluie/neige rendant les captures inexploitables.
+- **Disponibilité ingénieur civil de référence** : démarcher dès Phase 1 (réseau personnel ou recommandation prof Poly/ÉTS), ne pas attendre Phase 7.
 
 ---
 
-## 15. Évolutions Phase 2 envisageables
+## 19. Évolutions Phase 2+
 
-À considérer **uniquement si le PoC atteint Niveau B** et que la motivation produit reste.
+À considérer **uniquement si le PoC v1 atteint les KPIs** et que la motivation produit reste.
 
-### 15.1 Précision Niveau C (<20 cm)
+### 19.1 Enrichissement modules existants
 
-- Ajout d'un récepteur **u-blox ZED-F9P** (ArduSimple simpleRTK2B, ~600 $).
-- Abonnement **NTRIP** (SmartNet, CanNet ou Emlid Caster, ~50 $/mois).
-- **Dual-antenna** pour heading précis (deux F9P ou GNSS-INS Septentrio low-end).
-- Caméra **stéréo passive** (deux Arducam IMX678) pour redondance triangulation.
+- **Capteur inertiel iPhone pour IRI** : exploiter `CMDeviceMotion` accéléromètres pour produire un IRI proxy en parallèle de l'IES visuel — couplage rendrait le livrable comparable aux profileurs pros à coût marginal nul.
+- **Floutage automatique plaques + visages** : modèle ANPR + MTCNN ou similaire dans le pipeline avant tout partage externe.
+- **Comparaison temporelle multi-passages** : disparitions/apparitions/aggravations entre 2 captations de la même zone.
 
-### 15.2 Élargissement de la détection
+### 19.2 Nouveaux évaluateurs
 
-- **Fine-tuning** sur signalisation québécoise (MUTCD-Québec, panneaux bilingues).
-- **Détection d'état** : panneau penché, graffité, effacé, marquage usé. Modèles disponibles + entraînement custom léger.
-- **Segmentation chaussée** : faïençage, nids-de-poule, fissures (modèles type SAM ou Cityscapes-tuned).
-- **Détection de signalisation temporaire de chantier**.
+- `SignageStateEvaluator` — état des panneaux (penchés, graffités, effacés)
+- `MarkingEvaluator` — état du marquage chaussée (lignes effacées, manquantes, peinture éraflée)
+- `StreetFurnitureEvaluator` — état du mobilier urbain (lampadaires, abribus, bancs, poubelles)
 
-### 15.3 Mode opérationnel municipal
+### 19.3 Mode opérationnel
 
-- **Mobile mapping continu** : équipement permanent sur véhicules municipaux (cols bleus, autobus, balayeuses).
-- **Détection de changements** entre passages : disparitions, apparitions, déplacements.
-- **API d'écriture** authentifiée (le service municipal valide ou rejette les détections automatiques).
-- **Dashboard de supervision** des sessions, avec qualité de chaque passage.
+- **Mobile mapping continu** sur véhicules municipaux (autobus STL/STM, balayeuses) Phase 3.
+- **API d'écriture authentifiée** pour validation par utilisateur identifié.
+- **Dashboard web** de supervision multi-sessions, multi-mandats, multi-clients.
+- **Auth + permissions** pour usage multi-utilisateur.
 
-### 15.4 Ouverture de la donnée
+### 19.4 Ouverture et recherche
 
-- Publication d'un **dataset annoté Quebecois** sur HuggingFace Hub sous CC-BY-NC.
-- Format **HF Datasets canonique** + sidecars YOLO / COCO / GeoJSON / GPKG.
-- DATASHEET.md selon Gebru et al. 2018, croissant.json pour les métadonnées ML.
+- Publication du **dataset Quebec Pavement Winter Damage** sur HuggingFace Hub (CC-BY-NC).
+- DATASHEET.md selon Gebru et al. 2018 + croissant.json pour métadonnées ML.
 - Citation académique (CITATION.cff) si publication scientifique.
+- **Cofinancement CRSNG Alliance** avec firme partenaire et un labo de Poly/ÉTS/ULaval/McGill.
 
-### 15.5 Cloud et passage à l'échelle
+### 19.5 Cloud et passage à l'échelle
 
-- Pipeline déchargé sur un **serveur Linux + GPU NVIDIA** (post-captation).
-- **Stockage objet** (S3, B2, ou bucket institutionnel) pour vidéos brutes archivées.
-- **CI/CD** sur les modèles : versioning des poids, métriques de régression entre versions.
-
-### 15.6 Interface validateur (si nécessaire pour qualité produit)
-
-- UI desktop **SvelteKit** servie par le même backend pygeoapi (extension custom).
-- Workflow : galerie de frames priorisées → édition multi-bbox → image-level → soumission.
-- Persistance IndexedDB côté client + flush par batch.
-- Cible : 25 sec / frame médiane.
+- Pipeline déchargé sur **serveur Linux + GPU NVIDIA** (post-captation) pour mandats volumineux.
+- **Stockage objet** (B2 / GCS / bucket institutionnel) pour vidéos brutes archivées.
+- **CI/CD** sur les modèles : versioning des poids (DVC + bucket), métriques de régression entre versions.
 
 ---
 
-## 16. Glossaire
+## 20. Glossaire
 
 | Terme | Définition |
 |---|---|
-| **Niveau B** | Précision géométrique 0.5–2 m sur les objets détectés (vs Niveau A ~5 m, Niveau C <20 cm) |
-| **CEP95** | 95e centile de l'erreur radiale (Circular Error Probable 95 %) |
+| **wsmd** | Worksight Make Dataset (nom de code interne du projet) |
+| **PaveAudit** | Module d'évaluation d'état de chaussée selon méthodologie MTQ |
+| **ChantierWatch** | Module de détection de chantiers et cross-check avec permits OdP |
+| **IES** | Indice d'État Subjectif — score visuel 0-100 de l'état de chaussée selon MTQ |
+| **IRI** | International Roughness Index — index inertiel non-mesurable depuis CV seul |
+| **MTQ** | Ministère des Transports du Québec |
+| **PCI** | Pavement Condition Index — standard ASTM D6433 (référence internationale, distincte de l'IES MTQ) |
+| **OdP** | Occupation du Domaine Public — permis municipal pour chantier sur voie publique |
+| **κ Cohen** | Coefficient de Kappa Cohen — mesure d'accord inter-annotateur, 0.6+ = "substantial agreement" |
+| **mAP** | Mean Average Precision — métrique standard de détection d'objets |
 | **GNSS** | Global Navigation Satellite Systems (GPS, GLONASS, Galileo, BeiDou) |
-| **L1/L5** | Bandes de fréquences GNSS — bi-bande L1+L5 mitige la ionosphère et améliore la précision |
 | **IMU** | Inertial Measurement Unit (accéléromètres + gyroscopes + magnétomètre) |
-| **6-DOF** | 6 degrés de liberté : position (3) + orientation (3) |
-| **SLERP** | Spherical Linear Interpolation, pour interpoler des quaternions |
-| **Bundle adjustment** | Optimisation conjointe de positions 3D et poses caméra par minimisation de résidus de reprojection |
 | **OGC API Features** | Standard Open Geospatial Consortium pour la publication de features géographiques en REST/JSON |
 | **NAD83 MTM zone 8** | Système de coordonnées projeté pour le sud du Québec, EPSG:32188 |
-| **NTRIP** | Networked Transport of RTCM via Internet Protocol — distribution des corrections RTK |
-| **RTK** | Real-Time Kinematic — précision centimétrique avec station de base |
-| **Free provisioning** | Déploiement Xcode avec Apple ID gratuit (vs Apple Developer Program payant) |
+| **Grounding DINO** | Modèle CV open-vocabulary par IDEA-Research, détection bbox via prompts texte |
+| **YOLO-World** | Modèle CV open-vocabulary par Tencent, basé YOLOv8, détection via prompts texte |
+| **DBSCAN** | Density-Based Spatial Clustering — algo de clustering non-paramétrique pour zones de chantier |
+| **OSRM** | Open Source Routing Machine — moteur de routing/map-matching open source |
+| **Géobase** | Référentiel routier provincial du Québec, données ouvertes |
 | **MPS** | Metal Performance Shaders, accélérateur Apple Silicon pour PyTorch |
-| **wsmd** | Worksight Make Dataset (nom de code interne) |
-| **Landmark (au sens wsmd)** | Tout actif fixe géoréférencé connu issu d'un open data municipal (borne-fontaine, lampadaire, arbre, etc.), utilisé pour recaler les détections CV |
-| **R-tree** | Index spatial hiérarchique pour requêtes "candidats dans une bbox", supporté nativement par SQLite/GeoPackage |
+| **Active learning loop** | Boucle d'amélioration : prédiction → correction humaine → ré-entraînement |
+| **Pré-annotation** | Génération automatique de bbox candidats par modèle open-vocab, à réviser par humain |
+| **Free provisioning** | Déploiement Xcode avec Apple ID gratuit (vs Apple Developer Program payant) |
+| **CRSNG Alliance** | Programme de cofinancement recherche-industrie du Conseil de recherches en sciences naturelles et en génie du Canada |
+| **Loi 25** | Loi modernisant la protection des renseignements personnels (Québec, en vigueur 2024) |
 
 ---
 
-## 17. Décisions encore ouvertes (à valider)
+## 21. Décisions ouvertes (à valider en Phase 0)
 
-- [ ] **Nom du produit** : conserver "wsmd" comme nom interne ? Choisir un nom externe différent pour Phase 2 ?
-- [ ] **Zone test PoC** : préciser les rues de Longueuil — pertinence vs Montréal pour les landmarks (Données Québec).
-- [ ] **Mesure de vérité terrain** : RTK loué ou cartographie ouverte ? Trade-off coût vs précision absolue.
-- [ ] **Versioning data** : DVC (intégré Git) ou Git LFS ou bucket externe ?
-- [ ] **Licence du code** : MIT, Apache 2, GPL ? Impact sur réutilisation future par tiers.
-- [ ] **Modèle YOLO retenu** : v8n (rapide), v8s (équilibré), v8m (précis) ? À benchmarker en Phase 0.
-- [ ] **Passage à 2 personnes en dev** : utile pour paralléliser app iOS + pipeline Python ?
+- [ ] Confirmer disponibilité de l'iPhone 16 Pro personnel pour le projet (matériel personnel, jamais de l'employeur)
+- [ ] Vérifier les règles internes d'activités accessoires de l'employeur — divulgation simple, ou autorisation formelle ?
+- [ ] Identifier 1 ingénieur civil pour validation IES en Phase 7 (réseau perso ou recommandation prof Poly/ÉTS)
+- [ ] Vérifier la licence commerciale exacte de RDD2022 (académique stricte ? CC-BY ? CC-BY-NC ?)
+- [ ] Déterminer le nom commercial des deux modules (PaveAudit / ChantierWatch sont des placeholders)
+- [ ] Choisir nom commercial de la plateforme : conserver "wsmd" comme nom interne, ou trouver un nom externe ?
+- [ ] Statuer sur l'incorporation : Inc., SENC, OBNL, autre ? Quand (avant premier pitch ou avant première facture) ?
+- [ ] Définir tarification cible : per-km, per-mandat, abonnement annuel, hybride ?
+- [ ] Vérifier la disponibilité des permits OdP pour Longueuil et Sherbrooke en Phase 0 (sinon `GenericNoneAdapter` ou abandon zone)
+- [ ] Décider de l'audience de la première démo (firme prioritaire ou ville secondaire ?) — cadre le ton du rapport PDF
 
 ---
 
-*Fin du document.*
+*Fin du document. Version 4.0 — pivot évaluation d'état, 2026-04-27.*
