@@ -140,18 +140,7 @@ Si l'hypothèse est invalidée, l'auteur saura **où** se situe le maillon faibl
 - **Comparaison temporelle** multi-passages
 - **Mode mobile mapping continu** sur véhicules municipaux
 
-### 6.3 Engagements de qualité (PoC v1)
-
-| Module | Métrique | Cible |
-|---|---|---|
-| PaveAudit | κ Cohen sur classification IES MTQ vs ingénieur référence | ≥ 0.6 |
-| PaveAudit | mAP par classe de défaut | ≥ 0.75 |
-| PaveAudit | Erreur IES moyenne par segment | ±10 / 100 |
-| ChantierWatch | Recall détection zones de chantier | ≥ 85 % |
-| ChantierWatch | Précision verdict `unmatched` | ≥ 90 % |
-| ChantierWatch | F1 cross-check temporel permits | ≥ 0.85 |
-| Annotation | Vitesse médiane révision post-pré-annotation | ≤ 30 s/item |
-| Pipeline global | Temps traitement / heure de vidéo (Mac M-series) | ≤ 2× temps réel |
+KPIs et protocoles de validation : voir §12.
 
 ---
 
@@ -264,9 +253,7 @@ wsmd report <session> --format pdf
 wsmd serve                                              # pygeoapi http://localhost:5000
 ```
 
----
-
-## 8. Stack technique
+### 7.4 Stack technique
 
 | Couche | Choix | Justification |
 |---|---|---|
@@ -294,9 +281,9 @@ wsmd serve                                              # pygeoapi http://localh
 
 ---
 
-## 9. Pipeline de captation iOS
+## 8. Pipeline de captation iOS
 
-### 9.1 Exigences fonctionnelles de l'app
+### 8.1 Exigences fonctionnelles de l'app
 
 L'app iPhone est un **device autonome** qui capture tout sur place et transfère post-session. Elle doit :
 
@@ -313,7 +300,7 @@ L'app iPhone est un **device autonome** qui capture tout sur place et transfère
 7. Transfert post-session : AirDrop, USB, ou montage SMB sur le Mac.
 8. Déploiement : free-provisioning Apple ID + Xcode 16+ pour usage personnel et démos. Apple Developer Program (99 $/an) seulement quand un partenaire externe doit l'installer.
 
-### 9.2 Calibration
+### 8.2 Calibration
 
 **Calibration intrinsèque caméra** : à faire **une fois** avant tout usage opérationnel, par modèle d'iPhone.
 - Damier d'échiquier 10×7, taille 25 mm.
@@ -326,7 +313,7 @@ L'app iPhone est un **device autonome** qui capture tout sur place et transfère
 
 **Mount-check pré-session** : l'app vérifie via IMU que la caméra est dans une plage de pitch/roll acceptable (caméra horizontale ±10°, vue dégagée) et alerte sinon.
 
-### 9.3 Bundle de session produit
+### 8.3 Bundle de session produit
 
 ```json
 // manifest.json
@@ -371,9 +358,9 @@ L'app iPhone est un **device autonome** qui capture tout sur place et transfère
 
 ---
 
-## 10. Pipeline de traitement Mac
+## 9. Pipeline de traitement Mac
 
-### 10.1 Ingestion
+### 9.1 Ingestion
 
 `wsmd ingest <session>` :
 - Valide la structure du bundle (présence de tous les fichiers attendus).
@@ -381,7 +368,7 @@ L'app iPhone est un **device autonome** qui capture tout sur place et transfère
 - Crée le GeoPackage de session vide avec les tables communes.
 - Logge un résumé : durée, distance parcourue (interpolée GNSS), qualité moyenne `horizontalAccuracy`.
 
-### 10.2 Pré-annotation open-vocabulary
+### 9.2 Pré-annotation open-vocabulary
 
 `wsmd preannotate <session> --prompts prompts/<module>.yaml` :
 - Charge un modèle Grounding DINO (`IDEA-Research/grounding-dino-tiny` via HuggingFace) ou YOLO-World (Ultralytics).
@@ -440,27 +427,11 @@ classes:
     prompts: ["pile of excavated soil", "construction debris pile", "asphalt millings pile"]
 ```
 
-### 10.3 Annotation humaine (outil web local)
+### 9.3 Annotation humaine
 
-`wsmd annotate <session>` ouvre une UI web locale (FastAPI + SvelteKit, port 5001 par défaut) qui lit/écrit le même GeoPackage de session.
+`wsmd annotate <session>` ouvre une UI web locale qui lit/écrit le même GeoPackage de session que les évaluateurs. Architecture, workflow par module, raccourcis clavier et boucle active learning : voir §10.3 Annotation.
 
-**Workflow par module** :
-
-- **PaveAudit** : galerie des candidats par classe → frame contextuelle → confirmer/rejeter/refiner bbox/changer classe/ajuster sévérité MTQ → ajouter défauts manqués manuellement
-- **ChantierWatch** : galerie des zones détectées → confirmer/rejeter/refiner bbox géographique → ajuster permit-match si la suggestion est incorrecte → flagger comme "vraiment sans permit" ou "permit existe ailleurs"
-
-**Ergonomie cible** : 20-30 sec par item médian (post-pré-annotation). Raccourcis clavier obligatoires :
-- `1` = confirmer
-- `2` = rejeter
-- `3` = corriger classe
-- `4` = corriger sévérité
-- Espace = item suivant
-- ← → = navigation
-- A = ajouter manuellement
-
-**Stockage** : layer GeoPackage `verified_<module>` avec `candidate_id`, `verdict` (`confirmed` / `rejected` / `corrected` / `added_manually`), `corrected_class`, `corrected_severity`, `annotator_id`, `annotated_at`. Le layer `annotations_log` conserve l'historique audit trail.
-
-### 10.4 Évaluation par module
+### 9.4 Évaluation par module
 
 `wsmd evaluate <session> --modules pave_audit,chantier_watch` exécute chaque évaluateur en série :
 1. Charge le bundle + GeoPackage de session
@@ -470,7 +441,7 @@ classes:
 5. Logique métier propre (calcul IES MTQ, cross-check permits, etc.)
 6. Écrit ses layers de production dans le GeoPackage
 
-### 10.5 Export labels et fine-tuning
+### 9.5 Export labels et fine-tuning
 
 `wsmd export-labels <session> --format yolo --output datasets/qc_pave_v1/` :
 - Lit le layer `verified_pave_audit` (gold labels uniquement, `verdict ∈ {confirmed, corrected, added_manually}`)
@@ -505,7 +476,7 @@ pave_audit:
     notes: "Ajout 2500 frames Longueuil + frost_heave annotation dédiée"
 ```
 
-### 10.6 Livraison
+### 9.6 Livraison
 
 `wsmd report <session> --format pdf` génère un rapport client (template Quarto + Jinja2) :
 - Page 1 : sommaire exécutif (km parcourus, défauts par classe, zones chantier détectées, % unmatched)
@@ -518,15 +489,17 @@ pave_audit:
 
 ---
 
-## 11. Module PaveAudit
+## 10. Modules
 
-### 11.1 Objectif
+Deux modules livrables (PaveAudit, ChantierWatch) et un module habilitant (Annotation) qui alimente la boucle d'amélioration continue. L'architecture pluggable (§7.3) supporte l'ajout futur d'évaluateurs sans refonte du pipeline. Les KPIs et protocoles de validation propres à chaque module sont regroupés au §12.
 
-Produire un classement IES (Indice d'État Subjectif) automatisé par segment de chaussée selon la **méthodologie d'évaluation visuelle MTQ**, avec localisation des défauts individuels.
+### 10.1 PaveAudit — état de chaussée
+
+**Objectif** — produire un classement IES (Indice d'État Subjectif) automatisé par segment de chaussée selon la **méthodologie d'évaluation visuelle MTQ**, avec localisation des défauts individuels.
 
 **Référence** : Guide d'utilisation des indices d'état des chaussées (MTQ) + catalogue des dégradations MTQ.
 
-### 11.2 Classes de défauts
+**Classes de défauts**
 
 | Classe | MTQ | Spécificité QC | Source bootstrap |
 |---|---|---|---|
@@ -539,7 +512,7 @@ Produire un classement IES (Indice d'État Subjectif) automatisé par segment de
 | Soulèvement par gel | Frost heave | **Spécifique QC** — pas dans datasets ouverts | À annoter from scratch |
 | Dégradation au sel | Salt scaling | **Spécifique QC** — subtil | À annoter from scratch |
 
-### 11.3 Pipeline interne
+**Pipeline interne**
 
 1. Extraction de frames à 1-2 fps de la vidéo.
 2. Inférence YOLO custom fine-tuné → bbox de défauts par frame.
@@ -554,30 +527,17 @@ Produire un classement IES (Indice d'État Subjectif) automatisé par segment de
    - `pavement_segments` : segments routiers avec `ies_score`, `classification`, `n_defects_by_class`
    - `pavement_metadata` : version modèle, version prompts, conditions de captation
 
-### 11.4 Validation
-
-- 5-10 segments de référence captés à Montréal, indexés manuellement par 1 ingénieur civil de référence (à recruter en Phase 1, idéalement via réseau personnel ou recommandation académique).
-- Métriques :
-  - Accord κ Cohen sur classification IES (cible : ≥ 0.6)
-  - mAP par classe de défaut (cible : ≥ 0.75)
-  - Erreur IES moyenne par segment (cible : ±10/100)
-- Re-mesure après chaque itération de fine-tune.
-
-### 11.5 Livrable client
+**Livrable**
 
 - Rapport PDF par mandat : carte du réseau colorée par IES, top 20 segments les plus dégradés (avec photos), liste des défauts en annexe, tableau récapitulatif.
 - GeoPackage exportable QGIS / ArcGIS / GDAL.
 - Endpoint OGC API Features `pavement_segments` consommable directement.
 
----
+### 10.2 ChantierWatch — détection de chantiers vs permits
 
-## 12. Module ChantierWatch
+**Objectif** — détecter les zones de chantier sur la voirie, les cross-référencer avec les bases de permits OdP municipales open data, et flagger les chantiers sans permit correspondant comme **signaux d'audit** (non comme preuves légales).
 
-### 12.1 Objectif
-
-Détecter les zones de chantier sur la voirie, les cross-référencer avec les bases de permits OdP municipales open data, et flagger les chantiers sans permit correspondant comme **signaux d'audit** (non comme preuves légales).
-
-### 12.2 Classes de détection
+**Classes de détection**
 
 | Classe | COCO ? | Pré-annotation prompts |
 |---|---|---|
@@ -590,7 +550,7 @@ Détecter les zones de chantier sur la voirie, les cross-référencer avec les b
 | Clôture de chantier privée | ❌ | "construction site fence", "chain-link construction perimeter fence", "wooden site hoarding" |
 | Déblais | ❌ | "pile of excavated soil", "construction debris pile", "asphalt millings pile" |
 
-### 12.3 Pipeline interne
+**Pipeline interne**
 
 1. Détection frame-par-frame YOLO custom fine-tuné (ou YOLO-World direct si fine-tune pas prêt).
 2. **Clustering spatial** : DBSCAN sur coordonnées géographiques + temporelles → "zones de chantier" (polygones englobants).
@@ -610,7 +570,7 @@ Détecter les zones de chantier sur la voirie, les cross-référencer avec les b
    - `permits_reference` : copie du cache permits utilisé (traçabilité)
    - `unmatched_zones` : sous-ensemble flaggé pour audit (vue filtrée)
 
-### 12.4 Adaptateurs permits par ville
+**Adaptateurs permits par ville**
 
 ```python
 class PermitAdapter(Protocol):
@@ -620,43 +580,46 @@ class PermitAdapter(Protocol):
     def normalize(self, raw: dict) -> Permit: ...
 ```
 
-**Implémentations v1** :
+Implémentations v1 :
 - `MontrealPermitAdapter` — Données ouvertes Montréal, dataset "Entraves planifiées" et permits OdP
 - `SherbrookePermitAdapter` — à valider en Phase 2 (Phase 8 du plan), selon disponibilité des données ouvertes
 - `LongueuilPermitAdapter` — à valider, peut tomber en `GenericNoneAdapter` selon disponibilité
 - `GenericNoneAdapter` — fallback : toutes zones flaggées en `data_unavailable`, livrable identifie clairement la limitation
 
-### 12.5 Validation
-
-- 20-30 zones de chantier de référence captées à Montréal (ville avec permits open data les plus complets).
-- Métriques :
-  - Recall détection chantier (cible : ≥ 85 %) — proportion de chantiers réels détectés
-  - Précision verdict `unmatched` (cible : ≥ 90 %) — quand le système dit "unmatched", il a effectivement raison
-  - F1 sur cross-check temporel (cible : ≥ 0.85)
-- Cas `unmatched` validés manuellement par croisement avec d'autres sources (Mtl-info, signalements citoyens 311) avant de conclure violation.
-
-### 12.6 Livrable client
+**Livrable**
 
 - Rapport PDF par mandat : carte des zones détectées, tableau des `unmatched` avec photos extraites + permit IDs vérifiés/absents.
 - GeoPackage avec couche "potentielles violations à vérifier".
 - **Avertissement explicite** dans le rapport : *"Ce rapport produit un signal d'audit, pas une preuve légale. Toute action d'enforcement doit être précédée d'une vérification terrain par un inspecteur autorisé."*
 
----
+### 10.3 Annotation et boucle active learning
 
-## 13. Module Annotation et boucle active learning
+**Pourquoi un module à part entière** — aucun évaluateur ne sera jamais à 100 % en sortie. Pour qu'un livrable soit acceptable, un humain doit pouvoir relire, corriger, et **certifier**. Chaque correction = un nouvel exemple d'entraînement pour le fine-tune incrémental.
 
-### 13.1 Pourquoi un module à part entière
-
-Aucun évaluateur ne sera jamais à 100 % en sortie. Pour qu'un livrable soit acceptable, un humain doit pouvoir relire, corriger, et **certifier**. Chaque correction = un nouvel exemple d'entraînement pour le fine-tune incrémental.
-
-### 13.2 Architecture
+**Architecture**
 
 - App web locale (FastAPI backend + SvelteKit frontend) servie par `wsmd annotate` sur `localhost:5001`
 - Lit/écrit le **même GeoPackage** de session que les évaluateurs — pas de duplication de données
 - Auth absente en v1 (localhost), basic auth ajoutable en v2 quand un partenaire l'utilise
 - Module-aware : UI adaptée à chaque évaluateur (PaveAudit vs ChantierWatch ont des champs différents à corriger)
 
-### 13.3 Boucle d'amélioration
+**Workflow par module**
+
+- **PaveAudit** : galerie des candidats par classe → frame contextuelle → confirmer/rejeter/refiner bbox/changer classe/ajuster sévérité MTQ → ajouter défauts manqués manuellement
+- **ChantierWatch** : galerie des zones détectées → confirmer/rejeter/refiner bbox géographique → ajuster permit-match si la suggestion est incorrecte → flagger comme "vraiment sans permit" ou "permit existe ailleurs"
+
+**Ergonomie cible** : 20-30 sec par item médian (post-pré-annotation). Raccourcis clavier obligatoires :
+- `1` = confirmer
+- `2` = rejeter
+- `3` = corriger classe
+- `4` = corriger sévérité
+- Espace = item suivant
+- ← → = navigation
+- A = ajouter manuellement
+
+**Stockage** : layer GeoPackage `verified_<module>` avec `candidate_id`, `verdict` (`confirmed` / `rejected` / `corrected` / `added_manually`), `corrected_class`, `corrected_severity`, `annotator_id`, `annotated_at`. Le layer `annotations_log` conserve l'historique audit trail.
+
+**Boucle d'amélioration**
 
 ```
 Capture session
@@ -678,9 +641,7 @@ wsmd train --module X    → custom YOLO rapide (production)
 [boucle continue : nouvelles sessions → nouvelles annotations → ré-entraînement périodique]
 ```
 
-### 13.4 Honnêteté sur les limites
-
-Grounding DINO et YOLO-World ne sont **pas parfaits**. Ils vont :
+**Honnêteté sur les limites** — Grounding DINO et YOLO-World ne sont **pas parfaits**. Ils vont :
 - Manquer des défauts subtils (salt damage typique du QC peut être imperceptible).
 - Sortir des faux positifs sur textures ambiguës (ombres = fissures, etc.).
 - Être inconsistants frame-à-frame.
@@ -689,9 +650,11 @@ C'est exactement pourquoi l'humain est dans la boucle. La pré-annotation accél
 
 ---
 
-## 14. Données disponibles et stratégie de training
+## 11. Données et livraison
 
-### 14.1 État des lieux des datasets
+Cette chapitre couvre les données en entrée (datasets de bootstrap et de fine-tuning, considérations licences) et en sortie (schéma GeoPackage produit, configuration pygeoapi, endpoints OGC API exposés).
+
+### 11.1 État des lieux des datasets sources
 
 | Domaine | Source | Volume | Licence | QC-spécifique ? | Utilité v1 |
 |---|---|---|---|---|---|
@@ -704,7 +667,7 @@ C'est exactement pourquoi l'humain est dans la boucle. La pré-annotation accél
 | Permits OdP autres villes | Données Québec (variable selon municipalité) | variable | CC-BY | ✅ partiel | Selon ville |
 | Référentiel routier | Géobase Québec + OpenStreetMap | provincial complet | CC-BY / ODbL | ✅ | Snap-to-road |
 
-### 14.2 Stratégie phasée
+### 11.2 Stratégie d'entraînement phasée
 
 ```
 Phase 0 (semaines 1-3) : Bootstrap pré-entraîné
@@ -727,18 +690,14 @@ Phase 2 (continue) : Boucle active learning
   └─ Versioning des poids dans models/MANIFEST.yaml
 ```
 
-### 14.3 Considérations licences
+### 11.3 Considérations licences
 
 - **RDD2022** : licence académique, à vérifier précisément en Phase 0 avant utilisation commerciale. Si bloquant : training from scratch sur dataset 100 % maison Phase 2.
 - **COCO, OpenImages** : CC-BY, utilisables commercialement avec attribution.
 - **Permits OdP Montréal, Géobase, Données Québec** : CC-BY, utilisables sans restriction commerciale avec attribution.
 - **Dataset QC propre** : conserver privé en v1 ; décision sur publication HF Hub (CC-BY-NC) à revoir Phase 2.
 
----
-
-## 15. Modèle de données et livraison OGC
-
-### 15.1 Schéma GeoPackage `assets.gpkg`
+### 11.4 Schéma GeoPackage `assets.gpkg`
 
 ```
 Tables communes:
@@ -762,7 +721,7 @@ Tables Annotation:
   annotations_log           # historique audit trail
 ```
 
-### 15.2 Schéma `pavement_segments`
+### 11.5 Schéma `pavement_segments`
 
 ```sql
 CREATE TABLE pavement_segments (
@@ -782,7 +741,7 @@ CREATE TABLE pavement_segments (
 );
 ```
 
-### 15.3 Schéma `construction_zones`
+### 11.6 Schéma `construction_zones`
 
 ```sql
 CREATE TABLE construction_zones (
@@ -799,7 +758,7 @@ CREATE TABLE construction_zones (
 );
 ```
 
-### 15.4 Configuration pygeoapi
+### 11.7 Configuration pygeoapi
 
 ```yaml
 # pygeoapi-config.yaml
@@ -833,14 +792,14 @@ resources:
         table: construction_zones
 ```
 
-### 15.5 Endpoints exposés
+### 11.8 Endpoints exposés
 
 - `GET /collections/pavement_segments/items?bbox=...&ies_score__lt=50` — filtrage par BBox + score
 - `GET /collections/pavement_segments/items/{segment_id}` — segment individuel
 - `GET /collections/construction_zones/items?verdict=unmatched` — zones flaggées
 - `GET /collections/construction_zones/items?f=html` — UI HTML simple intégrée
 
-### 15.6 Consommation cible
+### 11.9 Consommation cible
 
 - **QGIS** : ajout de couche WFS / OGC API Features → consommation native
 - **Curl / scripts** : `curl http://localhost:5000/collections/pavement_segments/items?bbox=... > export.geojson`
@@ -848,9 +807,24 @@ resources:
 
 ---
 
-## 16. Validation par module
+## 12. Validation et engagements qualité
 
-### 16.1 Protocole PaveAudit
+### 12.1 KPIs PoC v1
+
+Cibles que le PoC v1 doit atteindre pour valider l'hypothèse produit (§5). Mesurées selon les protocoles ci-dessous.
+
+| Module | Métrique | Cible |
+|---|---|---|
+| PaveAudit | κ Cohen sur classification IES MTQ vs ingénieur référence | ≥ 0.6 |
+| PaveAudit | mAP par classe de défaut | ≥ 0.75 |
+| PaveAudit | Erreur IES moyenne par segment | ±10 / 100 |
+| ChantierWatch | Recall détection zones de chantier | ≥ 85 % |
+| ChantierWatch | Précision verdict `unmatched` | ≥ 90 % |
+| ChantierWatch | F1 cross-check temporel permits | ≥ 0.85 |
+| Annotation | Vitesse médiane révision post-pré-annotation | ≤ 30 s/item |
+| Pipeline global | Temps traitement / heure de vidéo (Mac M-series) | ≤ 2× temps réel |
+
+### 12.2 Protocole PaveAudit
 
 1. Sélectionner **5-10 segments de référence** dans la zone test Montréal (3-5 km de boucle), variés en état de chaussée.
 2. **Inspection manuelle** par 1 ingénieur civil de référence (à recruter Phase 1, via réseau personnel ou recommandation académique).
@@ -865,7 +839,7 @@ resources:
    - Histogramme erreurs IES
    - Cas problématiques identifiés (occlusions, distance, conditions)
 
-### 16.2 Protocole ChantierWatch
+### 12.3 Protocole ChantierWatch
 
 1. Identifier **20-30 zones de chantier** captées à Montréal sur boucle de 10-20 km.
 2. **Vérification manuelle** : pour chaque zone, croiser avec la base de permits OdP (téléchargée à la même date que la captation). Construire la vérité terrain `permitted` / `unmatched` / `permit_expired`.
@@ -876,7 +850,7 @@ resources:
    - F1 cross-check temporel
 5. **Validation manuelle des `unmatched`** par croisement Mtl-info / 311 (signalements citoyens) pour confirmer absence effective de permit.
 
-### 16.3 Validation portage Sherbrooke
+### 12.4 Validation portage Sherbrooke
 
 - Réplique du protocole sur 1-2 boucles à Sherbrooke en Phase 8.
 - Mesure de la dégradation de performance (modèle entraîné sur Mtl appliqué à Sherbrooke).
@@ -884,7 +858,7 @@ resources:
 
 ---
 
-## 17. Plan phasé
+## 13. Plan phasé
 
 | Phase | Durée | Livrable | Effort estimé |
 |---|---|---|---|
@@ -906,9 +880,9 @@ resources:
 
 ---
 
-## 18. Risques et mitigations
+## 14. Risques et mitigations
 
-### 18.1 Risques techniques
+### 14.1 Risques techniques
 
 | Risque | Probabilité | Impact | Mitigation |
 |---|---|---|---|
@@ -919,7 +893,7 @@ resources:
 | Volumes de vidéos ingérables | Faible | Sessions limitées | H.265 4K = ~6 GB/h ; SSD externe 1-2 TB suffit pour la durée du PoC |
 | iPhone 16 Pro indisponible / ancienne génération moins précise | Faible | Précision GNSS dégradée | Tester sur iPhone 15 Pro en backup ; mesurer empiriquement |
 
-### 18.2 Risques juridiques et de licences
+### 14.2 Risques juridiques et de licences
 
 | Risque | Probabilité | Impact | Mitigation |
 |---|---|---|---|
@@ -927,7 +901,7 @@ resources:
 | Loi 25 — vidéos avec plaques/visages | Moyenne | Risque légal sur la donnée brute | Stockage local SSD chiffré v1 ; floutage automatique avant tout partage externe (Phase 2, modèle ANPR + MTCNN) ; ne pas exporter de vidéos brutes |
 | Disclaimer "signal d'audit" insuffisant en cas de litige | Faible | Risque légal | Avis juridique requis avant tout usage du livrable hors cadre interne ; limitation de responsabilité explicite dans chaque rapport |
 
-### 18.3 Risques projet
+### 14.3 Risques projet
 
 - **Sous-estimation du temps d'annotation** : à minimiser, c'est facile à allonger. Bloquer la Phase 4 si volume annoté < 1500 frames à mi-phase et reconsidérer l'embauche d'un stagiaire Mitacs pour bootstrap dataset.
 - **Dérive de scope** : ne pas implémenter SignageStateEvaluator ni MarkingEvaluator ni floutage auto avant que PaveAudit + ChantierWatch ne soient livrés et validés.
@@ -936,36 +910,36 @@ resources:
 
 ---
 
-## 19. Évolutions Phase 2+
+## 15. Évolutions Phase 2+
 
 À considérer **uniquement si le PoC v1 atteint les KPIs** et que la motivation produit reste.
 
-### 19.1 Enrichissement modules existants
+### 15.1 Enrichissement modules existants
 
 - **Capteur inertiel iPhone pour IRI** : exploiter `CMDeviceMotion` accéléromètres pour produire un IRI proxy en parallèle de l'IES visuel — couplage rendrait le livrable comparable aux profileurs pros à coût marginal nul.
 - **Floutage automatique plaques + visages** : modèle ANPR + MTCNN ou similaire dans le pipeline avant tout partage externe.
 - **Comparaison temporelle multi-passages** : disparitions/apparitions/aggravations entre 2 captations de la même zone.
 
-### 19.2 Nouveaux évaluateurs
+### 15.2 Nouveaux évaluateurs
 
 - `SignageStateEvaluator` — état des panneaux (penchés, graffités, effacés)
 - `MarkingEvaluator` — état du marquage chaussée (lignes effacées, manquantes, peinture éraflée)
 - `StreetFurnitureEvaluator` — état du mobilier urbain (lampadaires, abribus, bancs, poubelles)
 
-### 19.3 Mode opérationnel
+### 15.3 Mode opérationnel
 
 - **Mobile mapping continu** sur véhicules municipaux (autobus STL/STM, balayeuses) Phase 3.
 - **API d'écriture authentifiée** pour validation par utilisateur identifié.
 - **Dashboard web** de supervision multi-sessions, multi-mandats, multi-clients.
 - **Auth + permissions** pour usage multi-utilisateur.
 
-### 19.4 Ouverture et recherche
+### 15.4 Ouverture et recherche
 
 - Publication du **dataset Quebec Pavement Winter Damage** sur HuggingFace Hub (CC-BY-NC).
 - DATASHEET.md selon Gebru et al. 2018 + croissant.json pour métadonnées ML.
 - Citation académique (CITATION.cff) si publication scientifique.
 
-### 19.5 Cloud et passage à l'échelle
+### 15.5 Cloud et passage à l'échelle
 
 - Pipeline déchargé sur **serveur Linux + GPU NVIDIA** (post-captation) pour mandats volumineux.
 - **Stockage objet** (B2 / GCS / bucket institutionnel) pour vidéos brutes archivées.
@@ -973,7 +947,7 @@ resources:
 
 ---
 
-## 20. Glossaire
+## 16. Glossaire
 
 | Terme | Définition |
 |---|---|
@@ -1004,7 +978,7 @@ resources:
 
 ---
 
-## 21. Décisions ouvertes (à valider en Phase 0)
+## 17. Décisions ouvertes (à valider en Phase 0)
 
 - [ ] Confirmer disponibilité de l'iPhone 16 Pro personnel pour le projet (matériel personnel, jamais de l'employeur)
 - [ ] Identifier 1 ingénieur civil de référence pour validation IES en Phase 7
