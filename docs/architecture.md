@@ -299,7 +299,7 @@ classes:
 
 ### 6.3 Annotation humaine
 
-`wsmd annotate <session>` ouvre une UI web locale (FastAPI + SvelteKit, port 5001 par défaut) qui lit/écrit le même GeoPackage de session que les évaluateurs. Spec produit (workflow, raccourcis clavier, ergonomie cible) : voir PRD §8.3.
+`wsmd annotate <session>` ouvre une UI web locale (FastAPI + SvelteKit, port 5001 par défaut) qui lit/écrit le même GeoPackage de session que les évaluateurs. Spec produit (workflow, raccourcis clavier, ergonomie cible) : voir PRD §7.3.
 
 ### 6.4 Évaluation par module
 

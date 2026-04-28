@@ -30,11 +30,6 @@ L'objectif est de **prouver la faisabilité technique** des deux modules sur tro
 
 ### 2.1 Pivot stratégique
 
-Une approche initiale (inventaire d'actifs géoréférencés à précision Niveau B 0.5–2 m) a été abandonnée pour la raison suivante :
-
-- **Risque technique élevé** : la précision Niveau B en milieu urbain dense, sans matériel RTK, dépend de variables (heading magnétique, multipath GNSS, conditionnement de la triangulation N-vues) qui sont difficiles à maîtriser dans un side project.
-
-Le pivot vers l'évaluation d'état :
 - **Réduit le risque technique** : la précision géométrique requise descend à ±10 m (segment de rue), résolue par snap-to-road sur Géobase/OSM. Les problèmes de heading, calibration extrinsèque, et triangulation disparaissent.
 - **Permet d'exploiter un référentiel québécois** : entraînement sur défauts hivernaux du Québec, reconnaissance de la signalisation MUTCD-Québec, intégration des données ouvertes municipales (Données Québec, Géobase, permits OdP).
 
@@ -55,27 +50,9 @@ Le pivot vers l'évaluation d'état :
 
 ---
 
-## 3. Cadre éthique et conflits d'intérêts
+## 3. Audiences et cas d'usage
 
-L'auteur est employé dans le secteur municipal québécois. Le projet wsmd est strictement **personnel et générique**, sans lien avec ses fonctions d'emploi. La discipline suivante est appliquée et inscrite au PRD pour traçabilité :
-
-### 3.1 Discipline en exécution
-
-- Aucune captation vidéo dans la municipalité-employeur de l'auteur, à aucune phase du projet.
-- Aucune utilisation de données, documents, outils, équipements ou systèmes appartenant à l'employeur.
-- Aucun travail sur le projet effectué pendant les heures rémunérées par l'employeur.
-- Le PRD et tous les livrables ne référencent ni ne traitent aucun cas spécifique à la municipalité-employeur.
-- Les zones de test sont sélectionnées dans des municipalités tierces (Montréal, Longueuil, Sherbrooke) sans relation avec l'employeur.
-
-### 3.2 Audit interne du PRD
-
-Si une partie du PRD venait à manquer à cette discipline (par exemple, en faisant référence à un dossier interne, en réutilisant un standard maison, ou en citant des chiffres confidentiels), l'auteur s'engage à corriger immédiatement. Aucune telle référence n'est connue à la date de rédaction.
-
----
-
-## 4. Audiences et cas d'usage
-
-### 4.1 Audiences produit
+### 3.1 Audiences produit
 
 Profils d'utilisateurs visés par les fonctionnalités du PoC v1. Cadre les exigences fonctionnelles (formats de livrable, ergonomie, terminologie) — pas la stratégie d'aller-au-marché, qui est traitée dans `docs/marketing/`.
 
@@ -84,9 +61,9 @@ Profils d'utilisateurs visés par les fonctionnalités du PoC v1. Cadre les exig
 | Inspecteurs certifiés réalisant des audits PCI/MTQ | Pré-classement automatisé de défauts pour révision ciblée | PaveAudit |
 | Services d'inspection municipaux | Détection de chantiers + cross-check permits OdP | ChantierWatch |
 
-**Hors-périmètre explicite** : aucun usage par la municipalité-employeur de l'auteur, ses fournisseurs, ses sous-traitants directs, ni les acteurs avec qui l'auteur est en relation professionnelle dans son emploi principal (cf. §3.1).
+**Hors-périmètre explicite** : aucun usage par la municipalité-employeur de l'auteur, ses fournisseurs, ses sous-traitants directs, ni les acteurs avec qui l'auteur est en relation professionnelle dans son emploi principal.
 
-### 4.2 Cas d'usage produit
+### 3.2 Cas d'usage produit
 
 Scénarios qui dictent les exigences fonctionnelles (volume, débit, format de sortie, ergonomie de révision).
 
@@ -98,11 +75,11 @@ Scénarios qui dictent les exigences fonctionnelles (volume, débit, format de s
 
 > Un service d'inspection municipal fait un tour de 30 km mensuel avec wsmd. Le système croise les zones de chantier détectées avec les permits OdP en open data, produit une liste de zones sans correspondance permit. L'inspection terrain est ciblée plutôt qu'à l'aveugle.
 
-### 4.3 Critères de succès et kill criteria
+### 3.3 Critères de succès et kill criteria
 
-Distinct des KPIs techniques par module (§10.1) — ce sont les seuils qui décident de la suite du projet.
+Distinct des KPIs techniques par module (§9.1) — ce sont les seuils qui décident de la suite du projet.
 
-**Succès complet** — tous les KPIs §10.1 atteints sur au moins 2 des 3 zones tests (Mtl + 1 autre), avec rapport de validation signé par l'ingénieur civil de référence. Décision : poursuivre vers Phase 2+ (§13).
+**Succès complet** — tous les KPIs §9.1 atteints sur au moins 2 des 3 zones tests (Mtl + 1 autre), avec rapport de validation signé par l'ingénieur civil de référence. Décision : poursuivre vers Phase 2+ (§12).
 
 **Succès partiel acceptable** — PaveAudit atteint κ ≥ 0.6 sur Mtl ; ChantierWatch atteint recall ≥ 75 % (au lieu de 85 %) ou portage Sherbrooke dégradé > 15 % mAP. Décision : poursuivre PaveAudit, considérer ChantierWatch comme exploration.
 
@@ -115,13 +92,12 @@ Distinct des KPIs techniques par module (§10.1) — ce sont les seuils qui déc
 | Volume annoté < 1500 frames à mi-Phase 4, sans plan d'accélération crédible | Mi-Phase 4 | Bloquer. Recouper avec stagiaire Mitacs ou réduire scope à 1 module. |
 | κ Cohen < 0.4 sur PaveAudit après 3 itérations de fine-tune | Fin Phase 7 (1ère mesure) | Repenser scope (outil de pré-priorisation, pas de classement IES) plutôt qu'enchaîner Phase 8. |
 | Dérive cumulée d'effort > 50 % vs estimé (i.e. > 375 h consommées sans avoir atteint Phase 5) | Suivi continu | Stop and reassess. Le side-project a déraillé ; décider arrêt ou refonte. |
-| Manquement à la discipline éthique §3.1 détecté ou suspecté | Toute phase | Arrêt immédiat. Retrait de toute donnée sensible, audit, divulgation à l'autorité d'éthique. |
 
-**Suivi** : mise à jour de cette section à chaque revue de phase (§11). Aucun kill criterion n'a été déclenché à la date de rédaction.
+**Suivi** : mise à jour de cette section à chaque revue de phase (§10). Aucun kill criterion n'a été déclenché à la date de rédaction.
 
 ---
 
-## 5. Hypothèse produit
+## 4. Hypothèse produit
 
 > Avec un **iPhone 16 Pro** mounté au pare-brise (caméra 4K + GNSS + IMU dans un seul device), des **modèles CV pré-entraînés fine-tunés sur dataset Québec hivernal**, une **boucle de pré-annotation par modèles open-vocabulary** (Grounding DINO / YOLO-World) accélérant le bootstrap, et un **pipeline post-captation Mac**, on peut livrer :
 >
@@ -134,9 +110,9 @@ Si l'hypothèse est invalidée, l'auteur saura **où** se situe le maillon faibl
 
 ---
 
-## 6. Périmètre du PoC v1
+## 5. Périmètre du PoC v1
 
-### 6.1 In-scope
+### 5.1 In-scope
 
 - **App iOS de captation tout-en-un** (Swift/SwiftUI) : vidéo 4K H.265 + GNSS + IMU + heading vrai, persistance locale, transfert post-session vers Mac.
 - **Pipeline post-captation Mac** (Python 3.12) : ingestion, pré-annotation, évaluation, livraison.
@@ -147,7 +123,7 @@ Si l'hypothèse est invalidée, l'auteur saura **où** se situe le maillon faibl
 - **Livraison OGC API Features** via pygeoapi sur GeoPackage + rapport PDF par session (template Quarto).
 - **Validation empirique** sur 3 zones : Montréal (richesse de données + debug), Longueuil (réseau intermédiaire), Sherbrooke (portabilité données pauvres).
 
-### 6.2 Out-of-scope v1 (architecture les supportera, mais pas implémentés)
+### 5.2 Out-of-scope v1 (architecture les supportera, mais pas implémentés)
 
 - Évaluateur **état signalisation** (panneaux penchés, graffités, effacés)
 - Évaluateur **mobilier urbain** (état des lampadaires, abribus, bancs, poubelles)
@@ -161,9 +137,9 @@ Si l'hypothèse est invalidée, l'auteur saura **où** se situe le maillon faibl
 - **Comparaison temporelle** multi-passages
 - **Mode mobile mapping continu** sur véhicules municipaux
 
-KPIs fonctionnels et protocoles de validation : voir §10.
+KPIs fonctionnels et protocoles de validation : voir §9.
 
-### 6.3 Exigences non-fonctionnelles (NFR)
+### 5.3 Exigences non-fonctionnelles (NFR)
 
 Contraintes transverses qui s'appliquent à l'ensemble du système, par-delà chaque module.
 
@@ -206,7 +182,7 @@ Contraintes transverses qui s'appliquent à l'ensemble du système, par-delà ch
 
 ---
 
-## 7. Architecture (vue de haut)
+## 6. Architecture (vue de haut)
 
 Le système se compose de trois éléments :
 
@@ -218,11 +194,11 @@ Toute la spec technique détaillée (schémas de données, signatures d'API plug
 
 ---
 
-## 8. Modules
+## 7. Modules
 
-Deux modules livrables (PaveAudit, ChantierWatch) et un module habilitant (Annotation) qui alimente la boucle d'amélioration continue. L'architecture pluggable (cf. `docs/architecture.md`) supporte l'ajout futur d'évaluateurs sans refonte du pipeline. Les KPIs et protocoles de validation propres à chaque module sont regroupés au §10.
+Deux modules livrables (PaveAudit, ChantierWatch) et un module habilitant (Annotation) qui alimente la boucle d'amélioration continue. L'architecture pluggable (cf. `docs/architecture.md`) supporte l'ajout futur d'évaluateurs sans refonte du pipeline. Les KPIs et protocoles de validation propres à chaque module sont regroupés au §9.
 
-### 8.1 PaveAudit — état de chaussée
+### 7.1 PaveAudit — état de chaussée
 
 **Objectif** — produire un classement IES (Indice d'État Subjectif) automatisé par segment de chaussée selon la **méthodologie d'évaluation visuelle MTQ**, avec localisation des défauts individuels.
 
@@ -262,7 +238,7 @@ Deux modules livrables (PaveAudit, ChantierWatch) et un module habilitant (Annot
 - GeoPackage exportable QGIS / ArcGIS / GDAL.
 - Endpoint OGC API Features `pavement_segments` consommable directement.
 
-### 8.2 ChantierWatch — détection de chantiers vs permits
+### 7.2 ChantierWatch — détection de chantiers vs permits
 
 **Objectif** — détecter les zones de chantier sur la voirie, les cross-référencer avec les bases de permits OdP municipales open data, et flagger les chantiers sans permit correspondant comme **signaux d'audit** (non comme preuves légales).
 
@@ -321,7 +297,7 @@ Implémentations v1 :
 - GeoPackage avec couche "potentielles violations à vérifier".
 - **Avertissement explicite** dans le rapport : *"Ce rapport produit un signal d'audit, pas une preuve légale. Toute action d'enforcement doit être précédée d'une vérification terrain par un inspecteur autorisé."*
 
-### 8.3 Annotation et boucle active learning
+### 7.3 Annotation et boucle active learning
 
 **Pourquoi un module à part entière** — aucun évaluateur ne sera jamais à 100 % en sortie. Pour qu'un livrable soit acceptable, un humain doit pouvoir relire, corriger, et **certifier**. Chaque correction = un nouvel exemple d'entraînement pour le fine-tune incrémental.
 
@@ -379,11 +355,11 @@ C'est exactement pourquoi l'humain est dans la boucle. La pré-annotation accél
 
 ---
 
-## 9. Données et stratégie d'entraînement
+## 8. Données et stratégie d'entraînement
 
 Datasets de bootstrap et de fine-tuning, stratégie phasée d'entraînement, considérations licences. Le schéma technique de livraison (GeoPackage, pygeoapi, endpoints OGC) est dans `docs/architecture.md`.
 
-### 9.1 État des lieux des datasets sources
+### 8.1 État des lieux des datasets sources
 
 | Domaine | Source | Volume | Licence | QC-spécifique ? | Utilité v1 |
 |---|---|---|---|---|---|
@@ -396,32 +372,32 @@ Datasets de bootstrap et de fine-tuning, stratégie phasée d'entraînement, con
 | Permits OdP autres villes | Données Québec (variable selon municipalité) | variable | CC-BY | ✅ partiel | Selon ville |
 | Référentiel routier | Géobase Québec + OpenStreetMap | provincial complet | CC-BY / ODbL | ✅ | Snap-to-road |
 
-### 9.2 Stratégie d'entraînement par stade
+### 8.2 Stratégie d'entraînement par stade
 
-Trois **stades** d'entraînement qui se chevauchent avec les **phases** projet (§11). Terminologie distincte pour éviter la confusion : *stade* = état du modèle ; *phase* = bloc de planning.
+Trois **stades** d'entraînement qui se chevauchent avec les **phases** projet (§10). Terminologie distincte pour éviter la confusion : *stade* = état du modèle ; *phase* = bloc de planning.
 
 | Stade modèle | Phases projet correspondantes | Activité | Cible quantitative |
 |---|---|---|---|
-| **Stade A — Baseline pré-entraînée** | §11 Phase 0 + début Phase 3 | YOLOv8 COCO (chantiers) et YOLOv8 RDD2022 (chaussée) appliqués out-of-the-box. Mesure baseline sur 200-300 frames QC captées. | ~60 % mAP, attendu et bas |
-| **Stade B — Bootstrap dataset QC** | §11 Phases 3 → 5 | Captation 5-10 sessions Mtl/Longueuil. Pré-annotation Grounding DINO/YOLO-World. Révision humaine 5 000-10 000 frames. Fine-tune YOLOv8 custom sur dataset combiné (RDD2022 + QC). | ~75 % mAP PaveAudit, 85 % recall ChantierWatch |
-| **Stade C — Boucle active learning** | §11 Phase 7+ et au-delà | Chaque nouvelle session captée + annotée → ajout au dataset. Ré-entraînement périodique (tous les 3-5 k frames). Mesure régression vs version précédente. Versioning des poids dans `models/MANIFEST.yaml`. | Amélioration monotone vs Stade B |
+| **Stade A — Baseline pré-entraînée** | §10 Phase 0 + début Phase 3 | YOLOv8 COCO (chantiers) et YOLOv8 RDD2022 (chaussée) appliqués out-of-the-box. Mesure baseline sur 200-300 frames QC captées. | ~60 % mAP, attendu et bas |
+| **Stade B — Bootstrap dataset QC** | §10 Phases 3 → 5 | Captation 5-10 sessions Mtl/Longueuil. Pré-annotation Grounding DINO/YOLO-World. Révision humaine 5 000-10 000 frames. Fine-tune YOLOv8 custom sur dataset combiné (RDD2022 + QC). | ~75 % mAP PaveAudit, 85 % recall ChantierWatch |
+| **Stade C — Boucle active learning** | §10 Phase 7+ et au-delà | Chaque nouvelle session captée + annotée → ajout au dataset. Ré-entraînement périodique (tous les 3-5 k frames). Mesure régression vs version précédente. Versioning des poids dans `models/MANIFEST.yaml`. | Amélioration monotone vs Stade B |
 
-**Précondition critique** : passage de Stade A à B nécessite que la licence RDD2022 soit confirmée utilisable (cf. §9.3 et §15). Si bloquant en Phase 0, basculer en stratégie "Stade B' — dataset 100 % maison" qui rallonge significativement la Phase 4.
+**Précondition critique** : passage de Stade A à B nécessite que la licence RDD2022 soit confirmée utilisable (cf. §8.3 et §14). Si bloquant en Phase 0, basculer en stratégie "Stade B' — dataset 100 % maison" qui rallonge significativement la Phase 4.
 
-### 9.3 Considérations licences
+### 8.3 Considérations licences
 
-- **RDD2022** : licence académique, à vérifier précisément en §11 Phase 0 avant utilisation commerciale. Si bloquant : training from scratch sur dataset 100 % maison (cf. Stade B' ci-dessus).
+- **RDD2022** : licence académique, à vérifier précisément en §10 Phase 0 avant utilisation commerciale. Si bloquant : training from scratch sur dataset 100 % maison (cf. Stade B' ci-dessus).
 - **COCO, OpenImages** : CC-BY, utilisables commercialement avec attribution.
 - **Permits OdP Montréal, Géobase, Données Québec** : CC-BY, utilisables sans restriction commerciale avec attribution.
 - **Dataset QC propre** : conserver privé en v1 ; décision sur publication HF Hub (CC-BY-NC) à revoir au passage en Stade C.
 
 ---
 
-## 10. Validation et engagements qualité
+## 9. Validation et engagements qualité
 
-### 10.1 KPIs PoC v1
+### 9.1 KPIs PoC v1
 
-Cibles que le PoC v1 doit atteindre pour valider l'hypothèse produit (§5). Mesurées selon les protocoles ci-dessous.
+Cibles que le PoC v1 doit atteindre pour valider l'hypothèse produit (§4). Mesurées selon les protocoles ci-dessous.
 
 | Module | Métrique | Cible |
 |---|---|---|
@@ -434,7 +410,7 @@ Cibles que le PoC v1 doit atteindre pour valider l'hypothèse produit (§5). Mes
 | Annotation | Vitesse médiane révision post-pré-annotation | ≤ 30 s/item |
 | Pipeline global | Temps traitement / heure de vidéo (Mac M-series) | ≤ 2× temps réel |
 
-### 10.2 Protocole PaveAudit
+### 9.2 Protocole PaveAudit
 
 1. Sélectionner **5-10 segments de référence** dans la zone test Montréal (3-5 km de boucle), variés en état de chaussée.
 2. **Inspection manuelle** par 1 ingénieur civil de référence (à recruter Phase 1, via réseau personnel ou recommandation académique).
@@ -449,7 +425,7 @@ Cibles que le PoC v1 doit atteindre pour valider l'hypothèse produit (§5). Mes
    - Histogramme erreurs IES
    - Cas problématiques identifiés (occlusions, distance, conditions)
 
-### 10.3 Protocole ChantierWatch
+### 9.3 Protocole ChantierWatch
 
 1. Identifier **20-30 zones de chantier** captées à Montréal sur boucle de 10-20 km.
 2. **Vérification manuelle** : pour chaque zone, croiser avec la base de permits OdP (téléchargée à la même date que la captation). Construire la vérité terrain `permitted` / `unmatched` / `permit_expired`.
@@ -460,7 +436,7 @@ Cibles que le PoC v1 doit atteindre pour valider l'hypothèse produit (§5). Mes
    - F1 cross-check temporel
 5. **Validation manuelle des `unmatched`** par croisement Mtl-info / 311 (signalements citoyens) pour confirmer absence effective de permit.
 
-### 10.4 Validation portage Sherbrooke
+### 9.4 Validation portage Sherbrooke
 
 - Réplique du protocole sur 1-2 boucles à Sherbrooke en Phase 8.
 - Mesure de la dégradation de performance (modèle entraîné sur Mtl appliqué à Sherbrooke).
@@ -468,7 +444,7 @@ Cibles que le PoC v1 doit atteindre pour valider l'hypothèse produit (§5). Mes
 
 ---
 
-## 11. Plan phasé
+## 10. Plan phasé
 
 | Phase | Durée | Livrable | Effort estimé |
 |---|---|---|---|
@@ -490,9 +466,9 @@ Cibles que le PoC v1 doit atteindre pour valider l'hypothèse produit (§5). Mes
 
 ---
 
-## 12. Risques et mitigations
+## 11. Risques et mitigations
 
-### 12.1 Risques techniques
+### 11.1 Risques techniques
 
 | Risque | Probabilité | Impact | Mitigation |
 |---|---|---|---|
@@ -503,7 +479,7 @@ Cibles que le PoC v1 doit atteindre pour valider l'hypothèse produit (§5). Mes
 | Volumes de vidéos ingérables | Faible | Sessions limitées | H.265 4K = ~6 GB/h ; SSD externe 1-2 TB suffit pour la durée du PoC |
 | iPhone 16 Pro indisponible / ancienne génération moins précise | Faible | Précision GNSS dégradée | Tester sur iPhone 15 Pro en backup ; mesurer empiriquement |
 
-### 12.2 Risques juridiques et de licences
+### 11.2 Risques juridiques et de licences
 
 | Risque | Probabilité | Impact | Mitigation |
 |---|---|---|---|
@@ -511,7 +487,7 @@ Cibles que le PoC v1 doit atteindre pour valider l'hypothèse produit (§5). Mes
 | Loi 25 — vidéos avec plaques/visages | Moyenne | Risque légal sur la donnée brute | Stockage local SSD chiffré v1 ; floutage automatique avant tout partage externe (Phase 2, modèle ANPR + MTCNN) ; ne pas exporter de vidéos brutes |
 | Disclaimer "signal d'audit" insuffisant en cas de litige | Faible | Risque légal | Avis juridique requis avant tout usage du livrable hors cadre interne ; limitation de responsabilité explicite dans chaque rapport |
 
-### 12.3 Risques projet
+### 11.3 Risques projet
 
 - **Sous-estimation du temps d'annotation** : à minimiser, c'est facile à allonger. Bloquer la Phase 4 si volume annoté < 1500 frames à mi-phase et reconsidérer l'embauche d'un stagiaire Mitacs pour bootstrap dataset.
 - **Dérive de scope** : ne pas implémenter SignageStateEvaluator ni MarkingEvaluator ni floutage auto avant que PaveAudit + ChantierWatch ne soient livrés et validés.
@@ -520,36 +496,36 @@ Cibles que le PoC v1 doit atteindre pour valider l'hypothèse produit (§5). Mes
 
 ---
 
-## 13. Évolutions Phase 2+
+## 12. Évolutions Phase 2+
 
 À considérer **uniquement si le PoC v1 atteint les KPIs** et que la motivation produit reste.
 
-### 13.1 Enrichissement modules existants
+### 12.1 Enrichissement modules existants
 
 - **Capteur inertiel iPhone pour IRI** : exploiter `CMDeviceMotion` accéléromètres pour produire un IRI proxy en parallèle de l'IES visuel — couplage rendrait le livrable comparable aux profileurs pros à coût marginal nul.
 - **Floutage automatique plaques + visages** : modèle ANPR + MTCNN ou similaire dans le pipeline avant tout partage externe.
 - **Comparaison temporelle multi-passages** : disparitions/apparitions/aggravations entre 2 captations de la même zone.
 
-### 13.2 Nouveaux évaluateurs
+### 12.2 Nouveaux évaluateurs
 
 - `SignageStateEvaluator` — état des panneaux (penchés, graffités, effacés)
 - `MarkingEvaluator` — état du marquage chaussée (lignes effacées, manquantes, peinture éraflée)
 - `StreetFurnitureEvaluator` — état du mobilier urbain (lampadaires, abribus, bancs, poubelles)
 
-### 13.3 Mode opérationnel
+### 12.3 Mode opérationnel
 
 - **Mobile mapping continu** sur véhicules municipaux (autobus STL/STM, balayeuses) Phase 3.
 - **API d'écriture authentifiée** pour validation par utilisateur identifié.
 - **Dashboard web** de supervision multi-sessions, multi-mandats, multi-clients.
 - **Auth + permissions** pour usage multi-utilisateur.
 
-### 13.4 Ouverture et recherche
+### 12.4 Ouverture et recherche
 
 - Publication du **dataset Quebec Pavement Winter Damage** sur HuggingFace Hub (CC-BY-NC).
 - DATASHEET.md selon Gebru et al. 2018 + croissant.json pour métadonnées ML.
 - Citation académique (CITATION.cff) si publication scientifique.
 
-### 13.5 Cloud et passage à l'échelle
+### 12.5 Cloud et passage à l'échelle
 
 - Pipeline déchargé sur **serveur Linux + GPU NVIDIA** (post-captation) pour mandats volumineux.
 - **Stockage objet** (B2 / GCS / bucket institutionnel) pour vidéos brutes archivées.
@@ -557,7 +533,7 @@ Cibles que le PoC v1 doit atteindre pour valider l'hypothèse produit (§5). Mes
 
 ---
 
-## 14. Glossaire
+## 13. Glossaire
 
 | Terme | Définition |
 |---|---|
@@ -588,7 +564,7 @@ Cibles que le PoC v1 doit atteindre pour valider l'hypothèse produit (§5). Mes
 
 ---
 
-## 15. Décisions ouvertes
+## 14. Décisions ouvertes
 
 Format : `[ID] Décision — Owner — Échéance — Statut — Bloquant si non résolu en`. L'auteur étant unique contributeur en v1, `Owner = Julien` partout ; le champ est conservé pour formalité et pour usage futur si un partenaire rejoint le projet. Les échéances sont relatives au démarrage projet (T0 = première journée Phase 0).
 
