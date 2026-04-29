@@ -324,7 +324,7 @@ L'app iPhone est un **device autonome** qui capture tout sur place et transfère
 7. Persister localement les flux dans le bundle de session (mp4 + jsonl), zéro réseau pendant la captation.
 8. Demander les permissions : `NSLocationWhenInUseUsageDescription`, `NSMotionUsageDescription`, `NSCameraUsageDescription`, capability "Location updates" en background.
 9. Transfert post-session : AirDrop, USB, ou montage SMB sur le Mac.
-10. Déploiement : free-provisioning Apple ID + Xcode 16+ pour usage personnel et démos. Apple Developer Program (99 $/an) à partir de la première campagne de captation soutenue ou du premier partenaire externe à équiper (free-provisioning expire tous les 7 jours, irritant en usage continu).
+10. Déploiement v1 : **free-provisioning** Apple ID + Xcode 16+, déploiement initial sur l'iPhone personnel de l'auteur. Apple Developer Program reporté **post-v1** : à considérer si redéploiement fréquent devient un irritant (free-provisioning expire tous les 7 jours) ou si un partenaire externe doit installer l'app.
 
 ### 5.2 Calibration
 
@@ -481,14 +481,14 @@ classes:
 
 `reperes evaluate <session> --modules pave_audit,chantier_watch` exécute le pipeline en trois étages :
 
-**Stage 1 — Préparation commune (séquentiel, ~10-15 min pour 1h de vidéo)**
+**Stage 1 — Préparation commune (séquentiel)**
 1. Validation du bundle et du manifest (lentille pinned, mount-check passé).
 2. Extraction des frames vidéo via ffmpeg à 1-2 fps → `prepared/frames_index.parquet` + images sur disque.
 3. Interpolation pose GNSS+IMU par frame → `prepared/pose_per_frame.parquet`.
 4. Détection des événements inertiels (filtrage passe-haut, peak detection, normalisation vitesse 30-70 km/h) → `prepared/imu_events.parquet`.
 5. Chargement Géobase QC + construction R-tree en mémoire.
 
-**Stage 2 — Évaluateurs en parallèle (`ProcessPoolExecutor`, durée = max des modules ~30-60 min)**
+**Stage 2 — Évaluateurs en parallèle (`ProcessPoolExecutor`, durée = max des modules)**
 
 Pour chaque module, dans un sous-processus :
 1. Réception de `PreparedStreams` (paths vers parquets)
@@ -504,7 +504,7 @@ Flag `--no-parallel` : exécution série dans le process principal pour debug.
 
 Flag `--pool-size N` : plafond le nombre de sous-processus simultanés (utile si > 3 modules ou si RAM tight).
 
-**Stage 3 — Consolidation (séquentiel, < 1 min)**
+**Stage 3 — Consolidation (séquentiel)**
 
 1. Pour chaque module : copie atomique de ses layers depuis `prepared/results_<module>.gpkg` vers `assets.gpkg` (transaction par module).
 2. Génération de `validation_report.md` (résumé numérique).

@@ -71,10 +71,11 @@ Installés via App Store, pas Homebrew.
 | Outil | Version | Usage |
 |---|---|---|
 | Xcode | 16+ | Build app SwiftUI, signature free-provisioning |
-| Apple ID personnel | — | Free-provisioning (7 jours, renouvelable) — suffit pour dev solo et premières démos courtes |
-| Apple Developer Program | 99 $/an | **À prévoir** : dès la première campagne de captation soutenue (Phase 7) ou dès qu'un partenaire externe doit installer l'app. Free-provisioning expire tous les 7 jours, ce qui devient un irritant majeur en captation régulière (rebuild + redéploiement avant chaque session). |
+| Apple ID personnel | — | **Free-provisioning** : déploiement initial sur l'iPhone personnel de l'auteur. Approche v1. Le profil expire tous les 7 jours mais peut être renouvelé via redéploiement Xcode. |
 
 L'app n'a pas de dépendances Swift externes au démarrage (AVFoundation, CoreLocation, CoreMotion sont natifs). Si Swift Package Manager devient nécessaire (ex. logging), géré dans Xcode directement.
+
+**Apple Developer Program (99 $/an) : reporté post-v1.** Free-provisioning suffit pour le PoC. À reconsidérer si : redéploiement répété devient un irritant en captation soutenue, ou un partenaire externe doit installer l'app sur son iPhone.
 
 ---
 
@@ -238,32 +239,30 @@ Les `sessions/` et `data/` ne vivent **pas** dans le repo Git (volume + données
 Pour un poste neuf, dans l'ordre :
 
 ```bash
-# 1. Homebrew + outils système (~10 min)
+# 1. Homebrew + outils système
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 brew install git ffmpeg gdal uv node@20 quarto direnv
 
-# 2. Xcode (~30 min, depuis App Store, manuel)
+# 2. Xcode depuis App Store (manuel)
 
-# 3. Repo + Python venv (~5 min)
+# 3. Repo + Python venv
 git clone <repo> ~/src/reperes && cd ~/src/reperes
 uv python install 3.12
 uv venv --python 3.12 && source .venv/bin/activate
 uv sync --extra dev
 
-# 4. Validation MPS (~30 sec)
+# 4. Validation MPS
 python -c "import torch; assert torch.backends.mps.is_available()"
 
-# 5. Frontend annotation (~3 min)
+# 5. Frontend annotation (si UI custom utilisée — sinon installer Label Studio)
 cd apps/annotate-ui && npm install && cd -
 
-# 6. Référentiel routier (~5 min, téléchargement one-shot)
+# 6. Référentiel routier (téléchargement one-shot)
 bash scripts/setup_road_network.sh
 
 # 7. Test end-to-end sur session-fixture
 reperes ingest tests/fixtures/sample_session/
 ```
-
-**Temps total install poste neuf** : ~1 h hors temps Xcode (essentiellement download/install des paquets).
 
 ---
 
@@ -279,7 +278,7 @@ Pour rester focus PoC v1, **ne pas installer maintenant** :
 | MLflow / W&B | Manifest YAML manuel suffit pour solo | Si > 1 contributeur sur fine-tune |
 | Floutage (egolossas, OpenDP) | Pas de partage externe en Phase 0-1 | Avant tout livrable client externe |
 | GitHub Actions / CI | Pas de collab, tests locaux suffisent | Quand un partenaire commence à pusher |
-| Apple Developer Program 99 $/an | Free-provisioning suffit pour dev solo | Première campagne de captation soutenue ou premier partenaire externe à équiper |
+| Apple Developer Program 99 $/an | Free-provisioning suffit pour le PoC v1 (déploiement initial sur iPhone personnel auteur) | Si redéploiement fréquent devient un irritant ou besoin de partage externe |
 
 ---
 

@@ -14,7 +14,7 @@
 Construire une **plateforme d'audit automatisé d'actifs viaires municipaux** par captation vidéo géoréférencée et **inertielle** depuis un véhicule, avec une **architecture pluggable d'évaluateurs spécialisés**.
 
 Le PoC v1 livre **deux modules** :
-- **PaveAudit** — état de chaussée selon la méthodologie d'évaluation visuelle MTQ. Un **démonstrateur inertiel expérimental** (proxy IRI à partir des accéléromètres iPhone) est construit en parallèle mais **hors KPI v1** : non-calibré véhicule par véhicule, livré comme PoC technique séparé pour calibration sérieuse en Phase 2.
+- **PaveAudit** — état de chaussée selon la méthodologie d'évaluation visuelle MTQ, avec **score inertiel proxy IRI** (RMS d'accélération verticale normalisée par vitesse) calculé par segment. Score relatif intra-session en v1 ; calibration véhicule pour score absolu inter-sessions est un objectif Phase 2.
 - **ChantierWatch** — détection de chantiers et cross-référencement avec les bases de permits d'occupation du domaine public (OdP) en open data municipal
 
 L'**annotation humaine** des sorties s'appuie en v1 sur **Label Studio local** (outil open-source mature), pas sur une UI custom — décision de scope pour livrer plus vite. Une UI custom n'est codée en v1.5+ que si Label Studio se révèle bloquant.
@@ -80,7 +80,7 @@ Scénarios qui dictent les exigences fonctionnelles (volume, débit, format de s
 
 Distinct des KPIs techniques par module (§9.1) — ce sont les seuils qui décident de la suite du projet.
 
-**Succès complet** — tous les KPIs §9.1 atteints sur **les 2 zones tests** (Mtl + 1 zone de portage proche), avec rapport de validation signé par l'ingénieur civil de référence. Décision : poursuivre vers Phase 2+ (§12).
+**Succès complet** — tous les KPIs §9.1 atteints sur **les 2 zones tests** (Mtl + 1 zone de portage proche). Décision : poursuivre vers Phase 2+ (§12).
 
 **Succès partiel acceptable** — PaveAudit visuel atteint κ ≥ 0.4 (au lieu de 0.5) **OU** ChantierWatch atteint recall ≥ 60 % (au lieu de 75 %) **OU** portage zone secondaire dégradé > 15 % mAP. Décision : repositionner PaveAudit en outil de pré-priorisation, ChantierWatch en démonstrateur, calibration et précision en Phase 2.
 
@@ -88,12 +88,13 @@ Distinct des KPIs techniques par module (§9.1) — ce sont les seuils qui déci
 
 | Condition | Mesuré à | Action |
 |---|---|---|
-| **GATE 1** : Grounding DINO + RDD2022 baseline mAP < 0.4 sur classes simples (cône, fissure visible) | T0 + 8 sem (fin Phase 1) | **Stop ou pivot**. Le bootstrap ML ne marchera pas sur Quebec hivernal sans investissement dataset majeur — repenser scope avant d'avoir bâti le pipeline complet. |
-| **GATE 2** : κ Cohen IA-humain < 0.4 après premier fine-tune | T0 + 16-20 sem (fin Phase 4) | **Repositionner** en outil pré-priorisation pure, abandonner prétention IES MTQ. |
-| Licence RDD2022 incompatible et coût Stade B' (dataset 100 % maison) > 50 h supplémentaires | Fin Phase 0 | Suspendre. Décider entre rescoping ou abandon. |
-| Indisponibilité de l'ingénieur civil de référence après 3 mois de démarchage | Fin Phase 3 | Suspendre validation. Pivoter vers auto-annotation rigoureuse + revue par pair non-certifié. |
-| Volume annoté < 2000 frames à mi-Phase 4, sans plan d'accélération crédible | Mi-Phase 4 | Bloquer. Recouper avec stagiaire Mitacs ou réduire scope à 1 module. |
-| Dérive cumulée d'effort > 50 % vs estimé (i.e. > 600 h consommées sans avoir atteint GATE 2) | Suivi continu | Stop and reassess. Le side-project a déraillé ; décider arrêt ou refonte. |
+| **GATE 1** : Grounding DINO + RDD2022 baseline mAP < 0.4 sur classes simples (cône, fissure visible) | Fin Phase 1 | **Stop ou pivot**. Le bootstrap ML ne marchera pas sur Quebec hivernal sans investissement dataset majeur — repenser scope avant d'avoir bâti le pipeline complet. |
+| **GATE 2** : κ Cohen IA-vs-auteur < 0.4 après premier fine-tune | Fin Phase 4 | **Repositionner** en outil pré-priorisation pure, abandonner prétention IES MTQ. |
+| **GATE Validité** : κ_self auteur-vs-auteur (test-retest 10 segments, ≥ 14 j d'écart) < 0.6 | Avant Phase 7 validation finale | **Bloquer la validation**. Le scoring auteur n'est pas assez stable pour servir de vérité de référence — réviser la rubrique écrite, re-scorer, re-tester avant de mesurer le κ pipeline. |
+| **GATE Biais commun** : ρ Spearman inertiel-vs-visuel global ≥ 0.5 mais écart entre strates (vitesse / type rue) > 0.3 | Phase 7 | **Repositionner** le signal inertiel comme "comptage d'événements par segment" plutôt que "score continu corrélé à l'IES" : la corrélation globale est portée par un biais commun, pas par l'état de chaussée. |
+| Licence RDD2022 incompatible et bascule Stade B' (dataset 100 % maison) hors scope soutenable | Fin Phase 0 | Suspendre. Décider entre rescoping ou abandon. |
+| Volume annoté insuffisant à mi-Phase 4, sans plan d'accélération crédible | Mi-Phase 4 | Bloquer. Recouper avec stagiaire Mitacs ou réduire scope à 1 module. |
+| Effort consommé bien au-delà du scope initial sans avoir atteint GATE 2 | Suivi continu | Stop and reassess. Le side-project a déraillé ; décider arrêt ou refonte. |
 
 **Suivi** : mise à jour de cette section à chaque revue de phase (§10). Aucun kill criterion n'a été déclenché à la date de rédaction.
 
@@ -103,10 +104,11 @@ Distinct des KPIs techniques par module (§9.1) — ce sont les seuils qui déci
 
 > Avec un **iPhone récent** (16 Pro ou 17 Pro) monté au pare-brise (caméra 4K + GNSS + IMU dans un seul device), des **modèles CV pré-entraînés fine-tunés sur dataset Québec hivernal**, une **boucle de pré-annotation par modèles open-vocabulary** (Grounding DINO / YOLO-World) accélérant le bootstrap, et un **pipeline post-captation Mac**, on peut livrer :
 >
-> - Un **classement IES (Indice d'État Subjectif) automatisé** atteignant **κ Cohen ≥ 0.5** (moderate-to-substantial agreement) avec un ingénieur civil de référence sur classes MTQ, sur réseau urbain et tronçon municipal. Cible calibrée sur la borne humain-humain typique de la littérature (κ humain-humain sur IES MTQ tourne entre 0.5 et 0.7).
+> - Un **classement IES (Indice d'État Subjectif) automatisé** atteignant **κ Cohen ≥ 0.5** (moderate-to-substantial agreement) vs scoring manuel par l'auteur selon catalogue MTQ, sur réseau urbain et tronçon municipal. Cible calibrée sur la borne humain-humain typique de la littérature (κ humain-humain sur IES MTQ tourne entre 0.5 et 0.7).
+> - Un **score inertiel proxy IRI** par segment, atteignant **ρ Spearman ≥ 0.5** avec `ies_visual` sur les segments où couverture plage exploitable (30-70 km/h) ≥ 70 % (validation convergente), et **reproductibilité intra-véhicule ≤ 15 / 100** sur 3 passages d'une même boucle de référence.
 > - Une **détection de chantiers** à **≥ 75 % de recall** avec cross-référencement automatique aux bases open data de permits OdP, isolant les détections sans correspondance avec **≥ 80 % de précision sur le verdict `unmatched`**.
 >
-> Un **démonstrateur inertiel** est construit en parallèle (proxy IRI à partir de l'IMU iPhone) mais **n'est pas inclus dans les KPIs v1** : sa calibration véhicule par véhicule et sa validation contre une vérité IRI mesurée sont des objectifs Phase 2.
+> La calibration véhicule pour score inertiel **absolu** inter-sessions et la validation contre une vérité IRI mesurée par profileur professionnel restent des objectifs Phase 2.
 
 **Précondition critique** : ces objectifs ne sont atteints qu'**après la Phase 1 d'annotation** (bootstrap dataset Québec via pré-annotation + révision humaine). En sortie de Phase 0, les modèles pré-entraînés out-of-the-box donneront une baseline ~60 % mAP — c'est attendu, c'est le point de départ.
 
@@ -120,7 +122,7 @@ Si l'hypothèse est invalidée, l'auteur saura **où** se situe le maillon faibl
 
 - **App iOS de captation tout-en-un** (Swift/SwiftUI) : vidéo 4K H.265 + GNSS + IMU 100 Hz (accéléro + gyro + magnéto) + heading vrai + métadonnées de mount (lentille AVFoundation pinned, pitch/roll moyen) + métadonnées véhicule (marque/modèle/année saisis avant session), persistance locale, transfert post-session vers Mac.
 - **Pipeline post-captation Mac** (Python 3.12) : ingestion, pré-annotation, évaluation, livraison. **Orchestration séquentielle monolithique en v1** : préparation commune (frames, pose interpolée par frame), puis itération sur les évaluateurs, puis consolidation GeoPackage. Aucun service externe, aucun Docker, snap-to-road en code Python via R-tree spatial sur référentiel routier en mémoire. Parallélisation `ProcessPoolExecutor` différée v1.5 (gain négligeable à 2 modules, complexité élevée).
-- **Module PaveAudit** : détection visuelle de défauts de chaussée selon catalogue MTQ (8 classes), agrégation par segment routier, calcul **IES visuel**, livrable cartographique. Branche inertielle **construite séparément en démonstrateur expérimental hors KPI** (cf. §7.1).
+- **Module PaveAudit** : détection visuelle de défauts de chaussée selon catalogue MTQ (8 classes), agrégation par segment routier, calcul **IES visuel** + **score inertiel proxy IRI** par segment, livrable cartographique commun (cf. §7.1).
 - **Module ChantierWatch** : détection visuelle de zones de chantier (cônes, barrières, signalisation temporaire, véhicules construction, clôtures privées, déblais), cross-référencement avec permits OdP, flag des `unmatched`. Vision-only en v1.
 - **Annotation humaine** : intégration **Label Studio local** (open-source mature) avec import/export GeoPackage. Pas d'UI custom en v1 (différée si Label Studio bloquant).
 - **Boucle active learning** : pré-annotation Grounding DINO/YOLO-World → révision Label Studio → export gold labels → fine-tune → ré-évaluation, avec versioning des poids (manifest manuel + dossier).
@@ -147,7 +149,6 @@ Si l'hypothèse est invalidée, l'auteur saura **où** se situe le maillon faibl
 - **Plugin system par entry points Python** — différé v2 si > 3 modules réels deviennent nécessaires
 - **Service OGC API Features** via pygeoapi — différé v1.5 (export GeoPackage suffit en mono-utilisateur)
 - **UI annotation custom** (FastAPI + SvelteKit) — différée si Label Studio bloquant pour v1
-- **Inertiel en livrable client** — démonstrateur seulement en v1, intégration v1.5 après calibration véhicule
 
 KPIs fonctionnels et protocoles de validation : voir §9.
 
@@ -156,7 +157,7 @@ KPIs fonctionnels et protocoles de validation : voir §9.
 Contraintes transverses qui s'appliquent à l'ensemble du système, par-delà chaque module.
 
 **Performance**
-- Pipeline post-captation Mac : ≤ 2× temps réel sur Mac M-series (i.e. 1 h de vidéo traitée en ≤ 2 h, hors fine-tune). Cible facilitée par le pipeline parallèle (Stage 2 exécute les évaluateurs concurremment via `ProcessPoolExecutor`).
+- Pipeline post-captation Mac : ≤ 3× temps réel sur Mac M-series, hors fine-tune (cf. §9.1). Cible passe à ≤ 2× quand le pipeline parallèle Stage 2 (`ProcessPoolExecutor`) sera activé en v1.5.
 - Captation iOS : pas de drop frame vidéo, gaps IMU < 50 ms, GNSS samples logged au taux natif. Lentille `builtInWideAngleCamera` pinned (fallback automatique multi-lentille désactivé pour préserver la calibration intrinsèque).
 - UI annotation : interaction click-to-next < 200 ms, navigation entre items fluide à 60 fps.
 
@@ -240,7 +241,7 @@ Deux modules livrables (PaveAudit visuel, ChantierWatch). L'annotation humaine e
 
 **Pipeline interne**
 
-PaveAudit consomme les artefacts préparés (frames + pose interpolée). Le pipeline v1 se concentre sur la **branche visuelle (méthodologie MTQ)**. Une branche inertielle expérimentale est construite en parallèle hors du flux de scoring KPI (cf. encadré ci-bas).
+PaveAudit consomme les artefacts préparés (frames + pose interpolée + événements inertiels normalisés vitesse). Deux branches indépendantes calculent un score par segment ; les deux scores sont exposés en parallèle dans le livrable v1 (la fusion en score unique est un objectif Phase 2).
 
 *Branche visuelle (méthodologie MTQ)*
 
@@ -254,31 +255,32 @@ PaveAudit consomme les artefacts préparés (frames + pose interpolée). Le pipe
    - Conversion en valeur de déduction MTQ par classe selon les barèmes
    - **Score IES visuel 0-100** par segment (`ies_visual`)
 
-*Démonstrateur inertiel — hors KPI v1*
+*Branche inertielle (proxy IRI)*
 
-> Construit séparément en Phase 4 (≤ 1 semaine d'effort). **Non livré au client en v1**, non inclus dans les KPIs §9.1. Objectif : valider qualitativement que le signal IMU iPhone capte bien quelque chose sur la chaussée, sans prétention de score absolu ni de calibration véhicule.
-
-1. Détection des pics d'accélération verticale (filtrage passe-haut + peak detection) à partir de `imu.jsonl`.
-2. Filtrage plage de vitesse exploitable (30-70 km/h GNSS), normalisation amplitude par vitesse.
-3. Snap-to-road via R-tree, comptage événements par segment.
-4. Visualisation côte-à-côte avec `ies_visual` sur 5-10 segments choisis aux GATE 2 pour inspection qualitative (notebook ou export QGIS).
-
-Aucun `inertial_score` n'est exposé dans le GeoPackage livrable v1. Si le démonstrateur révèle un signal qualitatif intéressant, la calibration véhicule et l'intégration en livrable sont l'objet de Phase 2 (§12.1).
+1. Lecture des événements inertiels produits par Stage 1 (`prepared/imu_events.parquet`) : pics d'accélération verticale après filtrage passe-haut, normalisés par vitesse, restreints à la plage exploitable 30-70 km/h.
+2. Snap-to-road via R-tree (mêmes segments que la branche visuelle).
+3. **Agrégation par segment** :
+   - Comptage des événements par classe de sévérité (faible / modérée / sévère)
+   - RMS de l'amplitude normalisée sur le segment, pondéré par couverture plage exploitable
+   - **Score inertiel 0-100** par segment (`inertial_score`), **relatif intra-session**
+   - `pct_in_speed_range` : % de la durée segment dans la plage exploitable. Segments avec couverture < 30 % marqués `unavailable`.
 
 *Sortie consolidée*
 
-5. Output GeoPackage layers :
+6. Output GeoPackage layers :
    - `pavement_defects` : chaque détection visuelle avec `frame_idx`, `bbox`, `class`, `severity`, `confidence`
-   - `pavement_segments` : segments routiers avec `ies_visual`, `classification_visual`, `n_defects_by_class`
+   - `pavement_imu_events` : événements inertiels individuels avec position GNSS interpolée, amplitude brute et normalisée, sévérité
+   - `pavement_segments` : segments routiers avec `ies_visual`, `inertial_score`, `classification_visual`, `n_defects_by_class`, `n_imu_events`, `pct_in_speed_range`
    - `pavement_metadata` : version modèle, version prompts, conditions de captation, véhicule
-
-(Le démonstrateur inertiel produit des artefacts séparés en `prepared/imu_demo/`, hors livrable principal.)
 
 **Livrable**
 
-- Rapport PDF par mandat : carte du réseau colorée par `ies_visual`, top 20 segments les plus dégradés visuellement, liste des défauts en annexe, tableau récapitulatif.
-- GeoPackage exportable QGIS / ArcGIS / GDAL avec `ies_visual` sur chaque segment.
-- Démonstrateur inertiel : visualisation séparée (notebook ou capture d'écran QGIS) sur 5-10 segments d'inspection qualitative, **non livré au client**.
+- Rapport PDF par mandat : deux cartes du réseau côte-à-côte (colorées par `ies_visual` et par `inertial_score`), top 20 segments par chaque score, intersection des deux tops (segments dégradés sur les deux signaux), liste des défauts et événements inertiels en annexe, tableau récapitulatif.
+- GeoPackage exportable QGIS / ArcGIS / GDAL avec les deux scores sur chaque segment, plus les événements inertiels individuels géoréférencés.
+- **Avertissement explicite** dans chaque rapport :
+  - `inertial_score` est **relatif intra-session**, non comparable entre sessions sans calibration véhicule (Phase 2).
+  - **Non étalonné contre IRI ASTM E1926** : ne permet pas de classer un segment dans les grades IRI standards (excellent / bon / acceptable / mauvais selon FHWA). Validité **interne** établie (cohérence avec `ies_visual`, reproductibilité 3 passages, contrôle de biais commun par strate) mais **pas validité absolue**. Classe les segments **les uns par rapport aux autres au sein d'une session**, sans correspondance numérique à des grades IRI.
+  - Une calibration profileur professionnel (Phase 2, cf. §12.1) est requise pour usage en classification de réseau ou comparaison inter-municipalités.
 
 ### 7.2 ChantierWatch — détection de chantiers vs permits
 
@@ -361,7 +363,7 @@ Implémentations v1 :
 - Gold labels exportés sont importés dans GeoPackage layer `verified_<module>` avec `candidate_id`, `verdict`, `corrected_class`, `corrected_severity`, `annotated_at` pour traçabilité.
 - L'audit trail (qui a annoté quoi quand) est natif Label Studio.
 
-**Ergonomie cible** : 30-60 sec par item médian (Label Studio est moins optimisé qu'une UI dédiée mais reste utilisable). Si vitesse < 1500 frames/semaine soutenue après 2 semaines d'usage : revoir vers UI custom en v1.5 (différer pygeoapi en compensation).
+**Ergonomie cible** : 30-60 sec par item médian (Label Studio est moins optimisé qu'une UI dédiée mais reste utilisable). Si vitesse < 1500 frames/semaine soutenue après une période de rodage : revoir vers UI custom en v1.5 (différer pygeoapi en compensation).
 
 **Boucle d'amélioration**
 
@@ -442,32 +444,67 @@ Cibles que le PoC v1 doit atteindre pour valider l'hypothèse produit (§4). Mes
 
 | Module | Métrique | Cible |
 |---|---|---|
-| PaveAudit (visuel) | κ Cohen sur classification IES MTQ vs ingénieur référence | ≥ 0.5 |
+| **Prérequis méthodologique** | κ_self test-retest auteur-vs-auteur (10 segments, ≥ 14 j d'écart) | ≥ 0.6 |
+| PaveAudit (visuel) | κ_pipeline Cohen IA-vs-auteur sur classification IES MTQ | ≥ 0.5 |
+| PaveAudit (visuel) | Ratio κ_pipeline / κ_self (cohérence interne) | ≤ 1.0 |
 | PaveAudit (visuel) | mAP par classe de défaut | ≥ 0.65 |
 | PaveAudit (visuel) | Erreur IES moyenne par segment | ±15 / 100 |
+| PaveAudit (inertiel) | ρ Spearman global entre `inertial_score` et `ies_visual` (segments `pct_in_speed_range` ≥ 70 %) | ≥ 0.5 |
+| PaveAudit (inertiel) | Écart de ρ Spearman entre strates (vitesse / type rue) | ≤ 0.3 |
+| PaveAudit (inertiel) | Reproductibilité intra-véhicule (3 passages, écart `inertial_score` par segment) | ≤ 15 / 100 |
 | ChantierWatch | Recall détection zones de chantier | ≥ 75 % |
 | ChantierWatch | Précision verdict `unmatched` | ≥ 80 % |
 | ChantierWatch | F1 cross-check temporel permits | ≥ 0.7 |
 | Annotation (Label Studio) | Vitesse médiane révision post-pré-annotation | ≤ 60 s/item |
 | Pipeline global | Temps traitement / heure de vidéo (Mac M-series) | ≤ 3× temps réel |
 
-**Note sur les cibles** : revues à la baisse vs version antérieure du PRD pour calibrage sur la borne humain-humain de la littérature (κ humain-humain sur IES MTQ tourne typiquement entre 0.5 et 0.7 — un IA-vs-humain à 0.5 est déjà un succès opérationnel). Une cible inatteignable transforme un succès partiel en échec perçu. L'inertiel n'apparaît plus dans les KPIs : il est traité comme démonstrateur expérimental hors livrable v1 (cf. §7.1). Le pipeline ≤ 3× temps réel reflète l'orchestration séquentielle v1 (la cible 2× du PRD antérieur supposait `ProcessPoolExecutor` qui est différé).
+**Note sur les cibles**
+
+- **κ_self ≥ 0.6 est un prérequis** : si l'auteur n'est pas d'accord avec lui-même à 0.6 entre deux scorings espacés, le κ_pipeline n'a aucune valeur interprétable (cf. §9.2 et kill criterion §3.3). Le ratio κ_pipeline/κ_self ≤ 1.0 est une vérification de cohérence : un pipeline ne peut structurellement pas être plus en accord avec l'auteur que l'auteur ne l'est avec lui-même ; un ratio > 1 trahit une fuite (le scoring auteur a été influencé par les sorties pipeline).
+- **κ_pipeline calibré sur la borne humain-humain** de la littérature (κ humain-humain sur IES MTQ tourne typiquement entre 0.5 et 0.7).
+- **KPIs inertiels** (ρ Spearman et reproductibilité) : mesures de **validité convergente** et de **stabilité**, faute de vérité IRI mesurée par profileur professionnel en v1. Ne valident pas la justesse absolue. L'**écart entre strates ≤ 0.3** est un contrôle de biais commun : un ρ global élevé mais variant fortement entre strates de vitesse ou type de rue indique que la corrélation est portée par un biais transverse (vitesse, type), pas par l'état de chaussée.
+- **Pipeline ≤ 3× temps réel** reflète l'orchestration séquentielle v1 (la cible 2× supposait `ProcessPoolExecutor` qui est différé).
 
 ### 9.2 Protocole PaveAudit
 
+**Conditions de validité du κ Cohen** (mitigation du biais d'auto-validation)
+
+La vérité de référence v1 étant produite par l'auteur seul (pas par un ingénieur certifié), le κ mesure l'accord IA-vs-auteur. Pour qu'il ait une **valeur interprétable** et ne soit pas une simple validation circulaire, les contrôles méthodologiques suivants sont des **prérequis** :
+
+- **Rubrique écrite préalable** : grille concrète de conversion défaut → déduction MTQ, rédigée et **committée Git avant Phase 4** (avant tout entraînement). Ex. *"≥ 3 fissures longitudinales > 5 m → −20 IES, +1 nid-de-poule visible → −15 IES, +1 faïençage modéré sur > 1 m² → −25 IES"*. Permet la reproductibilité du scoring auteur dans le temps. Non modifiable rétroactivement (toute révision = nouveau scoring complet).
+- **Photos de référence MTQ** : 5-10 photos par classe de sévérité du catalogue, consultées pendant chaque scoring. Archivées dans `validation/reference_photos/`.
+- **Scoring à l'aveugle pré-pipeline** : l'auteur score manuellement chaque segment **avant** d'exécuter le pipeline d'évaluation. Scoring committé Git (horodaté par commit), aucune modification après visualisation des sorties pipeline.
+- **Ordre randomisé** : segments scorés dans un ordre aléatoire (`reperes validate plan-shuffle <session>`), pas dans l'ordre du parcours GPS, pour éviter que la mémoire visuelle d'un segment biaise le suivant.
+- **Délai capture-scoring ≥ 7 jours** : minimum entre la captation et le scoring manuel, pour réduire la mémoire visuelle de la session.
+- **Test-retest auteur (κ_self)** : 10 segments re-scorés ≥ 14 jours après le premier scoring, sans regarder le précédent. Calcul du **κ auteur-vs-auteur**. **Si κ_self < 0.6, le scoring n'est pas assez stable pour servir de vérité de référence** — réviser la rubrique avant de continuer la validation (cf. kill criterion §3.3).
+
+Le rapport de validation final reporte **trois mesures** : (a) **κ_self** (test-retest auteur, plancher de stabilité), (b) **κ_pipeline** (IA-vs-auteur, KPI principal), (c) **ratio κ_pipeline / κ_self** — un pipeline ne peut structurellement pas être plus en accord avec l'auteur que l'auteur ne l'est avec lui-même ; un ratio > 1 trahit une fuite (le scoring auteur a été influencé par les sorties pipeline).
+
+**Étapes du protocole**
+
 1. Sélectionner **5-10 segments de référence** dans la zone test Montréal (3-5 km de boucle), variés en état de chaussée.
-2. **Inspection manuelle** par 1 ingénieur civil de référence (à recruter Phase 1, via réseau personnel ou recommandation académique).
-3. Captation Repères des mêmes segments en 3 passages (matin/midi/fin de journée pour variabilité d'éclairage), véhicule unique pour limiter la variabilité de suspension.
-4. Exécution du pipeline → `ies_visual` par segment + liste des défauts visuels.
-5. Comparaison segment-à-segment :
-   - Accord sur classification IES (κ Cohen)
+2. Captation Repères des mêmes segments en **3 passages** (matin/midi/fin de journée pour variabilité d'éclairage), véhicule unique pour limiter la variabilité de suspension.
+3. **Délai ≥ 7 jours.**
+4. **Scoring manuel à l'aveugle par l'auteur** selon catalogue MTQ et rubrique préalable : pour chaque segment (ordre randomisé), identification des défauts visibles, sévérité par défaut, conversion en valeur de déduction, IES par segment. Scoring committé Git horodaté.
+5. Exécution du pipeline → `ies_visual` et `inertial_score` par segment + liste des défauts visuels + événements inertiels.
+6. Comparaison segment-à-segment :
+   - **κ_pipeline** : accord IA-vs-auteur sur classification IES
    - Précision/recall par classe de défaut (mAP)
    - Erreur IES moyenne (RMSE)
-6. Production de `validation_report.md` :
+7. **Validation convergente du score inertiel** :
+   - Calcul de **ρ Spearman global** entre `inertial_score` et `ies_visual` sur les segments où `pct_in_speed_range` ≥ 70 %.
+   - **Contrôle de biais commun** : stratification des segments par classe de vitesse (30-50 / 50-70 km/h) et par type de rue (collectrice / résidentielle / artérielle). ρ Spearman calculé **par strate**. Si ρ varie fortement entre strates (écart > 0.3), c'est un signal que la corrélation globale est portée par un biais commun (vitesse ou type de rue) plutôt que par l'état de chaussée — flag explicite dans le rapport.
+   - **Reproductibilité intra-véhicule** : à partir des 3 passages, calcul de l'écart de `inertial_score` par segment (cible ≤ 15 / 100). Segments avec écart > 25 documentés (suspension, mount, vitesse hors plage).
+8. **Test-retest κ_self** : 10 segments choisis aléatoirement parmi ceux scorés en étape 4, re-scorés par l'auteur ≥ 14 jours plus tard, sans accès au premier scoring. Calcul de κ_self.
+9. Production de `validation_report.md` :
    - Tableau de confusion classification IES
    - Histogramme erreurs IES
-   - Cas problématiques identifiés (occlusions, distance, conditions)
-7. Inspection qualitative démonstrateur inertiel sur 5-10 segments d'intérêt : noter si le signal IMU semble corrélé qualitativement à la perception terrain. Pas d'agrégation chiffrée en v1 (Phase 2 si motivation).
+   - **Trois κ** (κ_self, κ_pipeline, ratio)
+   - **ρ Spearman global et par strate** (vitesse, type de rue)
+   - Histogramme reproductibilité inertielle
+   - Cas problématiques identifiés (occlusions, distance, conditions, mount, suspension)
+
+**Honnêteté méthodologique** : le κ mesure l'accord IA-vs-auteur, pas IA-vs-inspecteur certifié. Le ρ Spearman mesure la **cohérence interne** des deux signaux Repères, pas leur **alignement avec une vérité IRI mesurée**. Ces limites sont explicitées dans tous les rapports v1 ; un upgrade vers validation par inspecteur tiers (κ) et étalonnage profileur (IRI) sont des étapes Phase 2 (cf. §12.1).
 
 ### 9.3 Protocole ChantierWatch
 
@@ -490,23 +527,19 @@ Cibles que le PoC v1 doit atteindre pour valider l'hypothèse produit (§4). Mes
 
 ## 10. Plan phasé
 
-| Phase | Durée | Livrable | Effort estimé |
-|---|---|---|---|
-| **0 — Setup environnement** | 2 sem | venv Python, MPS PyTorch validé, calibration intrinsèque iPhone (lentille pinned), repo Git initialisé, vérif licence RDD2022 | 8-12 h |
-| **1 — App iOS captation** | 3 sem | App SwiftUI déployée free-provisioning, bundle session produit (vidéo + GNSS + IMU 100 Hz + heading + manifest enrichi : lentille, pitch/roll mount, véhicule), mount-check | 30-45 h |
-| **2 — Pipeline ingestion + Stage 1 commun** | 2 sem | `reperes ingest`, frames extraction, pose interpolation, détection événements inertiels normalisés vitesse, JSON schemas validés, R-tree Géobase chargé, `PreparedStreams` | 15-22 h |
-| **3 — Pré-annotation + outil annotation web + orchestration Stage 2/3** | 4 sem | `reperes preannotate` avec Grounding DINO, outil web FastAPI+SvelteKit fonctionnel, orchestrateur `ProcessPoolExecutor` Stage 2, écriture consolidée Stage 3 | 35-50 h |
-| **4 — Bootstrap dataset + fine-tune PaveAudit visuel** | 4 sem | Annotation 3-5k frames Mtl, fine-tune YOLO PaveAudit, mAP baseline mesurée | 35-50 h (annotation = 20-25 h) |
-| **5 — Branche inertielle PaveAudit + Bootstrap ChantierWatch + adapter Mtl** | 4 sem | Détection événements inertiels intégrée à PaveAudit, `inertial_score` calculé par segment, fine-tune YOLO ChantierWatch, MontrealPermitAdapter, cross-check fonctionnel | 30-42 h |
-| **6 — Livraison OGC + rapports** | 2 sem | `reperes serve` avec pygeoapi, template rapport PDF Quarto avec deux scores PaveAudit côte-à-côte | 14-20 h |
-| **7 — Validation Montréal** | 2 sem | Captation + validation 5-10 segments + 20 zones, mesure Spearman inertiel/visuel, rapport de précision, recrutement ingénieur civil | 18-28 h |
-| **8 — Portage Sherbrooke** | 2 sem | SherbrookePermitAdapter (ou GenericNoneAdapter), captation + validation portabilité | 12-18 h |
-| **Total** | **~25 semaines** |  | **~200-290 h** |
+| Phase | Livrable |
+|---|---|
+| **0 — Setup environnement** | venv Python, MPS PyTorch validé, calibration intrinsèque iPhone (lentille pinned), repo Git initialisé, vérif licence RDD2022, baseline RDD2022 out-of-the-box mesurée sur 200 frames QC, **rubrique de scoring IES MTQ écrite et committée** (cf. §9.2 conditions de validité du κ) |
+| **1 — App iOS captation** | App SwiftUI déployée sur iPhone personnel via free-provisioning, bundle session produit (vidéo + GNSS + IMU 100 Hz + heading + manifest enrichi : lentille, pitch/roll mount, véhicule), mount-check |
+| **2 — Pipeline ingestion + Stage 1 commun** | `reperes ingest`, frames extraction, pose interpolation, détection événements inertiels normalisés vitesse, JSON schemas validés, R-tree Géobase chargé, `PreparedStreams` |
+| **3 — Pré-annotation + intégration Label Studio + orchestration Stage 2/3** | `reperes preannotate` avec Grounding DINO, intégration Label Studio (UI custom différée v1.5 si bloquant), orchestrateur Stage 2, écriture consolidée Stage 3 |
+| **4 — Bootstrap dataset + fine-tune PaveAudit visuel** | Annotation frames Mtl/zone secondaire, fine-tune YOLO PaveAudit, mAP baseline mesurée |
+| **5 — Branche inertielle PaveAudit + Bootstrap ChantierWatch + adapter Mtl** | Branche inertielle intégrée (`inertial_score` par segment), fine-tune YOLO ChantierWatch, MontrealPermitAdapter, cross-check fonctionnel |
+| **6 — Livraison OGC + rapports** | `reperes serve` avec pygeoapi, template rapport PDF Quarto avec deux scores PaveAudit côte-à-côte |
+| **7 — Validation Montréal** | Scoring manuel à l'aveugle (pré-pipeline, ordre randomisé, délai ≥ 7 j) sur 5-10 segments selon rubrique §9.2, captation 3 passages, exécution pipeline, mesure κ_pipeline + ρ Spearman global et stratifié + reproductibilité 3 passages, **test-retest κ_self ≥ 14 j plus tard** sur 10 segments, rapport de précision avec trois κ et stratification |
+| **8 — Portage zone secondaire** | Permit adapter zone secondaire (ou GenericNoneAdapter), captation + validation portabilité |
 
-À 8 h/semaine effectifs (soirs + 1 weekend par mois) : **6-7 mois calendaires**.
-À 12 h/semaine (intense) : **5-6 mois calendaires**.
-
-**Plan B si retard en Phase 5** : démo PaveAudit visuel seul en Phase 7 (sans branche inertielle), branche inertielle livrée en Phase 8 ou bonus. ChantierWatch livré en bonus visuel sans cross-check, finalisation cross-check Phase 8.
+**Plan B en cas de scope-cut** : démo PaveAudit visuel seul en Phase 7 (sans branche inertielle), branche inertielle livrée en Phase 8 ou bonus. ChantierWatch livré en bonus visuel sans cross-check, finalisation cross-check Phase 8.
 
 ---
 
@@ -517,11 +550,11 @@ Cibles que le PoC v1 doit atteindre pour valider l'hypothèse produit (§4). Mes
 | Risque | Probabilité | Impact | Mitigation |
 |---|---|---|---|
 | Grounding DINO + fine-tune ratent les défauts hivernaux subtils (frost heave, salt scaling) | Moyenne-haute | Cible IES non atteinte | Annotation manuelle dédiée à ces classes ; flag explicite dans rapport ; complément possible par signal inertiel pour les défauts de profil |
-| Signal inertiel trop bruité (suspension véhicule, vibrations parasites du mount) — Spearman < 0.5 | Moyenne | KPI inertiel non atteint, signal rejeté en Phase 2 | Logger marque/modèle véhicule en manifest ; tester sur 2-3 véhicules différents en Phase 5 ; si bruit dominant, repositionner comme "événements inertiels seuls" sans score agrégé |
+| Signal inertiel trop bruité (suspension véhicule, vibrations parasites du mount) — Spearman < 0.5 | Moyenne | KPI inertiel non atteint | Logger marque/modèle véhicule en manifest ; tester sur 2-3 véhicules différents en Phase 5 ; si bruit dominant, repositionner comme "événements inertiels seuls" (comptage par segment) sans score agrégé continu |
 | Permits Sherbrooke peu/pas en open data | Élevée | ChantierWatch dégradé sur Sherbrooke | `GenericNoneAdapter` qui flag toutes zones `data_unavailable` ; livrable identifie explicitement la limitation |
 | Pipeline parallèle : RAM MPS saturée avec 2+ modèles YOLO chargés simultanément | Faible | Crash Stage 2 ou swap silencieux | Pool size configurable (défaut = nb modules en v1, plafonnable si > 3 modules) ; mode `--no-parallel` pour debug |
-| Side project, fenêtre 5-7 mois optimiste | Moyenne | Démo retardée | Découpage livraisons : démo PaveAudit visuel seul à 4-5 mois si branche inertielle ou ChantierWatch retardent ; plan B documenté |
-| Validation κ ≥ 0.6 non atteinte malgré fine-tune | Moyenne | Cible qualité non atteinte | Calibrer scoring vs MTQ sur données réelles avant de promettre ; ajuster les seuils MTQ ; repositionner le module en "outil de pré-priorisation" |
+| Side project, scope optimiste | Moyenne | Démo retardée | Découpage livraisons : démo PaveAudit visuel seul si branche inertielle ou ChantierWatch retardent ; plan B documenté |
+| Validation κ ≥ 0.5 non atteinte malgré fine-tune | Moyenne | Cible qualité non atteinte | Calibrer scoring vs MTQ sur données réelles avant de promettre ; ajuster les seuils MTQ ; repositionner le module en "outil de pré-priorisation" |
 | Volumes de vidéos ingérables | Faible | Sessions limitées | H.265 4K = ~6 GB/h ; SSD externe 1-2 TB suffit pour la durée du PoC |
 | iPhone 16 Pro indisponible / ancienne génération moins précise | Faible | Précision GNSS dégradée, IMU moins fiable | Tester sur iPhone 15 Pro en backup ; mesurer empiriquement |
 | Lentille AVFoundation bascule automatiquement (Wide → UltraWide en basse lumière) invalidant la calibration intrinsèque | Faible-moyenne | Détections ratées ou bbox déformées en certaines conditions | Lentille `builtInWideAngleCamera` pinned explicitement, fallback désactivé ; logged dans manifest ; rejet de session en post-traitement si lentille a changé |
@@ -536,10 +569,16 @@ Cibles que le PoC v1 doit atteindre pour valider l'hypothèse produit (§4). Mes
 
 ### 11.3 Risques projet
 
-- **Sous-estimation du temps d'annotation** : à minimiser, c'est facile à allonger. Bloquer la Phase 4 si volume annoté < 1500 frames à mi-phase et reconsidérer l'embauche d'un stagiaire Mitacs pour bootstrap dataset.
+- **Sous-estimation du volume d'annotation** : à minimiser, c'est facile à allonger. Bloquer la Phase 4 si volume annoté insuffisant à mi-phase et reconsidérer l'embauche d'un stagiaire Mitacs pour bootstrap dataset.
 - **Dérive de scope** : ne pas implémenter SignageStateEvaluator ni MarkingEvaluator ni floutage auto avant que PaveAudit + ChantierWatch ne soient livrés et validés.
 - **Météo défavorable au planning de captation** : prévoir buffer (Phase 7-8) pour repasser en cas de pluie/neige rendant les captures inexploitables.
-- **Disponibilité ingénieur civil de référence** : démarcher dès Phase 1 (réseau personnel ou recommandation prof Poly/ÉTS), ne pas attendre Phase 7.
+- **Validation auto-administrée** : la vérité de référence v1 est produite par l'auteur seul. Risque de **biais auto-confirmant** (l'auteur, ayant entraîné le modèle sur ses propres annotations, peut inconsciemment scorer la vérité terrain de manière à confirmer le pipeline) et risque de **biais commun inertiel-visuel** (les deux signaux corrèlent parce qu'ils captent un biais transverse comme la vitesse, pas parce qu'ils mesurent l'état de chaussée). **Mitigations explicites au protocole §9.2** :
+  - Rubrique de scoring **écrite et committée Git avant Phase 4** (avant tout entraînement du modèle)
+  - **Scoring à l'aveugle** pré-pipeline, ordre randomisé, délai capture-scoring ≥ 7 jours
+  - **Test-retest κ_self** comme prérequis de validité (kill criterion §3.3 si < 0.6)
+  - **Stratification du ρ Spearman** par classe de vitesse et type de rue (kill criterion si écart entre strates > 0.3)
+  - Ratio κ_pipeline / κ_self ≤ 1.0 vérifié dans chaque rapport (détecte les fuites de scoring auteur ↔ sortie pipeline)
+  - Limite explicite documentée dans tous les livrables clients
 
 ---
 
@@ -549,7 +588,14 @@ Cibles que le PoC v1 doit atteindre pour valider l'hypothèse produit (§4). Mes
 
 ### 12.1 Enrichissement modules existants
 
-- **Calibration véhicule pour score inertiel absolu** : sessions de calibration sur segments connus (avec mesure IRI de référence par profileur si possible), dérivation d'un facteur de transfert par véhicule. Permet la comparabilité inter-sessions et l'alignement sur l'IRI ASTM E1926.
+- **Calibration véhicule pour score inertiel absolu** : transformation du score relatif intra-session en score absolu inter-sessions via un facteur de transfert par véhicule, étalonné contre une vérité IRI mesurée. C'est ce qui transforme un signal "indicateur" en une **mesure** au sens métrologique — et ce qui débloque l'ancrage absolu manquant en v1 (cf. §9.1 KPIs inertiels). Pistes concrètes pour obtenir l'étalonnage IRI :
+  - **Roadroid** (app iOS commerciale, abonnement annuel) — calibration véhicule semi-rigoureuse, données comparables IRI, accessible solo
+  - **Total Pave RC** ou solutions équivalentes (caméra + IMU sur véhicule étalonné)
+  - **Partenariat académique** (Polytechnique, ÉTS, Université Laval) ou **MTQ** : session conjointe de captation sur 5-10 km où le partenaire fournit des mesures IRI au profileur professionnel
+  - **Régression empirique** sur les rares segments où le MTQ a publié des données IRI dans ses bases ouvertes (à confirmer en Phase 2, faisabilité incertaine)
+  
+  Une seule session de calibration de 5-10 km avec ground-truth IRI permet de fitter un facteur de transfert par véhicule et d'ancrer le score relatif sur une échelle absolue. Sans cet ancrage, le score inertiel reste un signal d'auto-cohérence sans validité métrologique externe.
+- **Validation κ par inspecteur certifié tiers** : recrutement (réseau personnel, contact prof Poly/ÉTS, ou contrat ponctuel) d'un ingénieur certifié MTQ pour scorer indépendamment 5-10 segments de référence. Mesure du **κ pipeline-vs-inspecteur** et du **κ auteur-vs-inspecteur**. Si κ auteur-vs-inspecteur < 0.5, le scoring auteur v1 a été non-aligné sur la méthodo MTQ — toute la validation v1 doit être réinterprétée comme "alignement avec une rubrique auteur" plutôt que "alignement avec MTQ".
 - **Fusion vision + inertiel dans un score unique IES augmenté** : après accumulation de données en Phase 2, calibration empirique de poids `w_visual`, `w_inertiel` ou modèle ML léger (régression) qui apprend à combiner les deux signaux. Livré comme `ies_combined` en complément des deux scores parallèles.
 - **Suivi temporel inter-frames** (ByteTrack ou BoT-SORT intégrés à Ultralytics) : passage du clustering spatio-temporel post-hoc à un vrai tracker pour stabilisation des `track_id` cross-modules et amélioration de précision sur objets mobiles (ChantierWatch).
 - **Floutage automatique plaques + visages** : modèle ANPR + MTCNN ou similaire dans le pipeline avant tout partage externe.
@@ -621,17 +667,16 @@ Cibles que le PoC v1 doit atteindre pour valider l'hypothèse produit (§4). Mes
 
 ## 14. Décisions ouvertes
 
-Format : `[ID] Décision — Owner — Échéance — Statut — Bloquant si non résolu en`. L'auteur étant unique contributeur en v1, `Owner = Julien` partout ; le champ est conservé pour formalité et pour usage futur si un partenaire rejoint le projet. Les échéances sont relatives au démarrage projet (T0 = première journée Phase 0).
+Format : `[ID] Décision — Owner — Échéance — Statut — Bloquant si non résolu en`. L'auteur étant unique contributeur en v1, `Owner = Julien` partout ; le champ est conservé pour formalité et pour usage futur si un partenaire rejoint le projet. Les échéances sont relatives aux phases du plan §10.
 
 | ID | Décision | Owner | Échéance | Statut | Bloquant si non résolu en |
 |---|---|---|---|---|---|
-| D-01 | Confirmer disponibilité iPhone 16 Pro personnel pour le projet (jamais de l'employeur) | Julien | T0 + 3 j | À faire | Phase 1 |
-| D-02 | Vérifier licence exacte RDD2022 (académique stricte ? CC-BY ? CC-BY-NC ?) — lecture terms of use + email auteurs si ambigu | Julien | T0 + 14 j | À faire | Phase 4 (Stade B) |
-| D-03 | Vérifier disponibilité permits OdP open data pour Longueuil et Sherbrooke (sinon `GenericNoneAdapter` ou abandon zone) | Julien | T0 + 14 j | À faire | Phase 5 / Phase 8 |
-| D-04 | Identifier 1 ingénieur civil de référence pour validation IES — réseau perso ou contact prof Poly/ÉTS | Julien | T0 + 90 j | À faire | Phase 7 (validation finale) |
-| D-05 | Décision Stade B vs Stade B' selon résultat D-02 | Julien | Fin Phase 0 (T0 + 14 j) | Bloquée par D-02 | Phase 4 |
-| D-06 | EFVP/PIA Loi 25 légère à produire avant captation hors zones auteur | Julien | T0 + 30 j | À faire | Phase 1 captation Mtl |
-| D-07 | Vérifier chiffrement FileVault actif sur Mac + data-protection iOS sur iPhone | Julien | T0 + 1 j | À faire | Phase 1 |
+| D-01 | Confirmer disponibilité iPhone personnel pour le projet (jamais de l'employeur) | Julien | Avant Phase 1 | À faire | Phase 1 |
+| D-02 | Vérifier licence exacte RDD2022 (académique stricte ? CC-BY ? CC-BY-NC ?) — lecture terms of use + email auteurs si ambigu | Julien | Phase 0 | À faire | Phase 4 (Stade B) |
+| D-03 | Vérifier disponibilité permits OdP open data pour zone secondaire et Sherbrooke (sinon `GenericNoneAdapter` ou abandon zone) | Julien | Phase 0 | À faire | Phase 5 / Phase 8 |
+| D-04 | Décision Stade B vs Stade B' selon résultat D-02 | Julien | Fin Phase 0 | Bloquée par D-02 | Phase 4 |
+| D-05 | EFVP/PIA Loi 25 légère à produire avant captation hors zones auteur | Julien | Avant Phase 1 captation Mtl | À faire | Phase 1 captation Mtl |
+| D-06 | Vérifier chiffrement FileVault actif sur Mac + data-protection iOS sur iPhone | Julien | Phase 0 | À faire | Phase 1 |
 
 Statuts possibles : `À faire` · `En cours` · `Résolu (lien commit ou doc)` · `Bloquée par <ID>` · `Reportée Phase 2+`.
 
