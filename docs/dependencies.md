@@ -1,6 +1,6 @@
-# Dépendances poste de travail — wsmd
+# Dépendances poste de travail — Repères
 
-**Date** : 2026-04-27
+**Date** : 2026-04-28
 **Statut** : proposition initiale, à valider
 **Cible** : poste de développement et d'exécution du pipeline (MacBook M-series)
 
@@ -8,15 +8,15 @@
 
 ## 1. Philosophie d'installation
 
-> **Natif quand l'accélération matérielle compte. Docker quand le binaire est complexe à compiler.**
+> **Tout natif en v1. Aucun service externe, aucun Docker.**
 
 Trois principes structurent les choix :
 
 1. **PyTorch MPS doit tourner natif.** L'accélération Apple Silicon (Metal Performance Shaders) ne traverse pas Docker sur Mac. Un pipeline CV containerisé tomberait en CPU pur, soit ~10× plus lent. Donc le pipeline Python tourne dans un `venv` natif.
-2. **OSRM tourne en Docker.** C'est un service C++ avec build complexe (Boost, LuaJIT, etc.). L'image officielle `osrm/osrm-backend` est le mode d'installation standard. Aucun avantage à compiler natif.
+2. **Snap-to-road en code Python via R-tree.** Plutôt que d'installer un service de routing/map-matching externe (OSRM, Valhalla), Repères implémente le snap-to-road en code, en chargeant la Géobase Québec dans une structure R-tree en mémoire. Justification : (a) le besoin est un nearest-segment, pas du routing complet ; (b) la précision GNSS bi-bande de l'iPhone 16 Pro rend le bruit GPS modeste ; (c) zéro dépendance externe simplifie le déploiement.
 3. **Le frontend d'annotation tourne natif.** Node + Vite + SvelteKit s'itèrent plus vite en dev natif (HMR, debug navigateur). Pas de gain à containeriser un outil mono-utilisateur localhost.
 
-Conséquence pratique : **un seul service Docker** (OSRM), tout le reste en natif via Homebrew + uv + npm.
+Conséquence pratique : **aucun service Docker en v1**, tout en natif via Homebrew + uv + npm. Si Docker devient nécessaire en Phase 2 (PostGIS pour SaaS multi-utilisateur, Mitsuba pour synthèse de défauts, etc.), il sera ré-introduit à ce moment-là.
 
 ---
 
@@ -47,21 +47,20 @@ brew install \
   uv \
   node@20 \
   quarto \
-  docker \
-  docker-compose
+  direnv
 ```
 
 | Paquet | Usage | Notes |
 |---|---|---|
 | `git` | Versioning code, prompts, manifest modèles | — |
-| `ffmpeg` | Extraction frames + métadonnées timestamp depuis MP4 H.265 | obligatoire |
+| `ffmpeg` | Extraction frames + métadonnées timestamp depuis MP4 H.265 | obligatoire pour Stage 1 |
 | `gdal` | CLI `ogr2ogr` / `ogrinfo` pour debug GeoPackage hors Python | optionnel mais utile |
 | `uv` | Gestionnaire Python tout-en-un : versions Python, environnements, dépendances | remplace `pyenv` + `venv` + `pip` |
 | `node@20` | Build SvelteKit (outil annotation) | Node 22 LTS quand stable |
 | `quarto` | Génération rapports PDF clients | LaTeX direct, mais plus verbeux |
-| `docker` + `docker-compose` | Service OSRM | Colima si refus Docker Desktop |
+| `direnv` | Chargement `.envrc` automatique au cd dans le repo | pratique pour variables d'environnement |
 
-**Note Docker Desktop** : sur Mac, alternative open-source = `colima` (`brew install colima`). Pour OSRM seul, les deux fonctionnent. Docker Desktop est plus simple ; Colima évite la licence pro.
+**Pas de Docker requis en v1.** Si Phase 2 introduit PostGIS ou autre, on l'ajoutera à ce moment-là (Colima est l'alternative open-source à Docker Desktop sur Mac, à privilégier pour usage commercial sans licence).
 
 ---
 
@@ -72,8 +71,8 @@ Installés via App Store, pas Homebrew.
 | Outil | Version | Usage |
 |---|---|---|
 | Xcode | 16+ | Build app SwiftUI, signature free-provisioning |
-| Apple ID personnel | — | Free-provisioning (7 jours, renouvelable) — suffit pour dev solo et démos |
-| Apple Developer Program | 99 $/an | **Différé** : seulement quand un partenaire externe doit installer l'app |
+| Apple ID personnel | — | Free-provisioning (7 jours, renouvelable) — suffit pour dev solo et premières démos courtes |
+| Apple Developer Program | 99 $/an | **À prévoir** : dès la première campagne de captation soutenue (Phase 7) ou dès qu'un partenaire externe doit installer l'app. Free-provisioning expire tous les 7 jours, ce qui devient un irritant majeur en captation régulière (rebuild + redéploiement avant chaque session). |
 
 L'app n'a pas de dépendances Swift externes au démarrage (AVFoundation, CoreLocation, CoreMotion sont natifs). Si Swift Package Manager devient nécessaire (ex. logging), géré dans Xcode directement.
 
@@ -91,9 +90,7 @@ uv python install 3.12        # installe l'interpréteur si absent
 uv venv --python 3.12          # crée .venv/
 source .venv/bin/activate
 uv sync --extra dev            # installe deps depuis pyproject.toml + uv.lock
-```
-
-Workflow d'ajout de dépendance (au lieu de `pip install`) :
+```Workflow d'ajout de dépendance (au lieu de `pip install`) :
 
 ```bash
 uv add ultralytics             # runtime
@@ -126,13 +123,17 @@ opencv-python>=4.10
 pillow>=10.4
 ```
 
-**Géospatial**
+**Géospatial & traitement signal**
 ```
 pyproj>=3.7             # EPSG:32188 NAD83 MTM zone 8
-shapely>=2.0
+shapely>=2.0            # géométrie + snap-to-road
 geopandas>=1.0
 fiona>=1.10             # IO GeoPackage
-rtree>=1.3              # spatial index permits cache
+rtree>=1.3              # spatial index Géobase + permits cache
+scipy>=1.14             # peak detection inertiel, filtrage signal
+numpy>=2.0
+pandas>=2.2
+pyarrow>=18.0           # parquet pour artefacts Stage 1 (PreparedStreams)
 ```
 
 **Service web & livraison**
@@ -190,41 +191,28 @@ Le backend FastAPI sert l'API REST et lit/écrit le GeoPackage de session ; le f
 
 ---
 
-## 7. Services Docker
+## 7. Services externes
 
-Un unique service : OSRM pour le snap-to-road. Déclaré dans `docker/compose.yaml`.
+**Aucun en v1.** Le snap-to-road est implémenté en code Python (rtree + shapely sur Géobase QC chargée en mémoire au démarrage du pipeline). Le service web OGC (pygeoapi) tourne en process Python natif. Le backend annotation (FastAPI) idem.
 
-```yaml
-# docker/compose.yaml
-services:
-  osrm:
-    image: osrm/osrm-backend:latest
-    container_name: wsmd-osrm
-    ports:
-      - "5500:5000"
-    volumes:
-      - ../data/osrm:/data
-    command: osrm-routed --algorithm mld /data/quebec-latest.osrm
-    restart: unless-stopped
-```
-
-**Préparation des données OSRM (one-shot, ~1 h pour Québec)** :
+Données de référence à placer dans `data/road_network/` (téléchargement manuel one-shot) :
 
 ```bash
-mkdir -p data/osrm && cd data/osrm
+mkdir -p data/road_network && cd data/road_network
+
+# Option A — Géobase officielle Québec (préférée pour cohérence avec SIG QC)
+# Téléchargement depuis https://www.donneesquebec.ca/recherche/dataset/adresses-quebec
+# (chemin exact à confirmer Phase 0)
+
+# Option B — Extrait OSM Québec (fallback ou complément)
 curl -O https://download.geofabrik.de/north-america/canada/quebec-latest.osm.pbf
-docker run -t -v "${PWD}:/data" osrm/osrm-backend osrm-extract -p /opt/car.lua /data/quebec-latest.osm.pbf
-docker run -t -v "${PWD}:/data" osrm/osrm-backend osrm-partition /data/quebec-latest.osrm
-docker run -t -v "${PWD}:/data" osrm/osrm-backend osrm-customize /data/quebec-latest.osrm
+# Conversion en GeoPackage via ogr2ogr si besoin
+ogr2ogr -f GPKG osm_qc_supplement.gpkg quebec-latest.osm.pbf lines -where "highway IS NOT NULL"
 ```
 
-**Lancement quotidien** :
-```bash
-docker compose -f docker/compose.yaml up -d osrm
-# Vérification : curl http://localhost:5500/nearest/v1/driving/-73.5673,45.5012
-```
+**Empreinte disque** : Géobase QC ≈ 200-500 MB ; OSM extrait Québec ≈ 800 MB. Total < 1.5 GB.
 
-**Empreinte disque** : extrait Québec OSM ≈ 800 MB ; fichiers OSRM dérivés ≈ 4-6 GB.
+**Si Phase 2 introduit Docker** (PostGIS pour SaaS multi-utilisateur, Mitsuba pour synthèse de défauts, etc.), on ajoutera Docker à ce moment-là. Sur Mac, l'alternative open-source à Docker Desktop est `colima` (`brew install colima`), à privilégier pour usage commercial sans licence.
 
 ---
 
@@ -234,11 +222,11 @@ Fichier `.envrc` (à charger via `direnv` — `brew install direnv`) ou `.env` s
 
 ```bash
 # .envrc
-export WSMD_DATA_DIR="$HOME/wsmd-data"          # hors repo, sessions volumineuses
-export WSMD_MODELS_DIR="$WSMD_DATA_DIR/models"
-export OSRM_URL="http://localhost:5500"
-export PYTORCH_ENABLE_MPS_FALLBACK=1            # fallback CPU sur ops non-MPS
-export HF_HOME="$WSMD_DATA_DIR/.huggingface"    # cache modèles HF
+export REPERES_DATA_DIR="$HOME/reperes-data"        # hors repo, sessions volumineuses
+export REPERES_MODELS_DIR="$REPERES_DATA_DIR/models"
+export REPERES_ROAD_NETWORK="$REPERES_DATA_DIR/road_network/geobase_qc.gpkg"
+export PYTORCH_ENABLE_MPS_FALLBACK=1                # fallback CPU sur ops non-MPS
+export HF_HOME="$REPERES_DATA_DIR/.huggingface"     # cache modèles HF
 ```
 
 Les `sessions/` et `data/` ne vivent **pas** dans le repo Git (volume + données potentiellement sensibles avant floutage Phase 2). Le repo contient uniquement code, prompts YAML, et manifest modèles.
@@ -252,7 +240,7 @@ Pour un poste neuf, dans l'ordre :
 ```bash
 # 1. Homebrew + outils système (~10 min)
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-brew install git ffmpeg gdal uv node@20 quarto docker docker-compose direnv
+brew install git ffmpeg gdal uv node@20 quarto direnv
 
 # 2. Xcode (~30 min, depuis App Store, manuel)
 
@@ -268,14 +256,14 @@ python -c "import torch; assert torch.backends.mps.is_available()"
 # 5. Frontend annotation (~3 min)
 cd apps/annotate-ui && npm install && cd -
 
-# 6. OSRM data prep (~1 h, à lancer en arrière-plan)
-bash scripts/setup_osrm.sh
+# 6. Référentiel routier (~5 min, téléchargement one-shot)
+bash scripts/setup_road_network.sh
 
 # 7. Test end-to-end sur session-fixture
-wsmd ingest tests/fixtures/sample_session/
+reperes ingest tests/fixtures/sample_session/
 ```
 
-**Temps total install poste neuf** : ~2 h dont 1 h de download/build OSRM en arrière-plan.
+**Temps total install poste neuf** : ~1 h hors temps Xcode (essentiellement download/install des paquets).
 
 ---
 
@@ -285,17 +273,18 @@ Pour rester focus PoC v1, **ne pas installer maintenant** :
 
 | Outil | Pourquoi différer | Quand l'ajouter |
 |---|---|---|
+| Docker / Colima | Aucun service externe en v1 (snap-to-road en code) | Si Phase 2 introduit PostGIS, Mitsuba, ou besoin de packaging service-orienté |
 | DVC + bucket B2 | Pas de besoin de versioning data tant que dataset < 5 GB | Phase 2, quand dataset Quebec dépasse 10 k frames annotées |
 | PostGIS | GeoPackage suffit en mono-utilisateur ; PostGIS arrive si SaaS | Si pivot SaaS multi-tenant |
 | MLflow / W&B | Manifest YAML manuel suffit pour solo | Si > 1 contributeur sur fine-tune |
 | Floutage (egolossas, OpenDP) | Pas de partage externe en Phase 0-1 | Avant tout livrable client externe |
 | GitHub Actions / CI | Pas de collab, tests locaux suffisent | Quand un partenaire commence à pusher |
-| Apple Developer Program 99 $/an | Free-provisioning suffit pour dev solo | Premier partenaire externe à équiper |
+| Apple Developer Program 99 $/an | Free-provisioning suffit pour dev solo | Première campagne de captation soutenue ou premier partenaire externe à équiper |
 
 ---
 
 ## 11. Questions ouvertes
 
-- **Docker Desktop vs Colima** : préférence ? Colima évite la licence Docker payante pour usage commercial, mais légèrement plus complexe à debugger.
+- **Géobase officielle vs OSM Québec** : la Géobase QC officielle est préférable pour la cohérence avec les SIG municipaux (mêmes IDs de tronçons que les bases internes des villes), mais demande inscription / demande d'accès. OSM est immédiatement téléchargeable mais ses IDs ne matchent pas ceux des bases municipales. Décision à prendre Phase 2 (ingestion). Approche probable : OSM en fallback automatique si Géobase manquante pour une zone donnée.
 - **Stockage sessions** : disque interne suffit pour Phase 0-1 (3 zones × ~30 km × ~5 GB/h ≈ 30 GB). Externe NVMe à prévoir Phase 2 quand le volume grossit.
 - **Backup** : Time Machine sur les sessions ? Ou exclusion + backup ciblé vers B2 ? À trancher avant la première vraie campagne de captation.
